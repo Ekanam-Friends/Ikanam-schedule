@@ -67,14 +67,21 @@ HTTP-фид (FastAPI)  ─┘           │
 ```bash
 git clone https://github.com/Ekanam-Friends/Ikanam-schedule.git
 cd Ikanam-schedule
-cp .env.example .env      # заполни BOT_TOKEN, CREDENTIALS_KEY, PUBLIC_BASE_URL
-docker compose up -d
+cp .env.example .env      # BOT_TOKEN, CREDENTIALS_KEY, POSTGRES_PASSWORD, DOMAIN, PUBLIC_BASE_URL
+docker compose up -d --build
 ```
+
+Поднимается четыре контейнера: PostgreSQL, бот, сервер подписки и Caddy, который
+сам получает сертификат Let's Encrypt для `DOMAIN`. Домен покупать не обязательно —
+подойдёт `51-250-1-2.sslip.io` (IP машины через дефисы). Миграции базы применяются
+при старте; обновление — `git pull && docker compose up -d --build`.
+
+Пошагово для Yandex Cloud, включая порты и резервные копии: [docs/deploy-yandex.md](docs/deploy-yandex.md).
 
 `CREDENTIALS_KEY` генерируется так:
 
 ```bash
-openssl rand -base64 32
+python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ```
 
 Хостинг должен быть **в России**: при заходе с зарубежных IP личный кабинет требует капчу.

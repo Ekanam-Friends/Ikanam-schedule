@@ -1,0 +1,69 @@
+# Полный стенд одной командой: docker compose up -d
+#
+#   db     — PostgreSQL; данные в volume, переживают пересоздание контейнеров
+#   bot    — Telegram-бот (long polling, наружу ничего не открывает)
+#   web    — сервер подписки на календарь, слушает только внутри сети compose
+#   caddy  — единственный процесс с портами наружу: HTTPS и сертификат
+#            Let's Encrypt для DOMAIN, проксирует в web
+#
+# Миграции применяет тот процесс, который поднялся первым, — оба умеют.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bot}
+      POSTGRES_USER: ${POSTGRES_USER:-bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bot} -d ${POSTGRES_DB:-bot}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-bot}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "app.bot.main"]
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-bot}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "uvicorn", "app.web.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?задайте DOMAIN в .env, например 51-250-1-2.sslip.io}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

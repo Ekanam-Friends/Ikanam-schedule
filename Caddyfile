@@ -1,0 +1,19 @@
+# HTTPS для сервера подписки. Сертификат Let's Encrypt Caddy получает и
+# продлевает сам — для этого DOMAIN должен указывать на этот сервер, а порты
+# 80 и 443 быть открыты в группе безопасности.
+#
+# Домен покупать не обязательно: sslip.io отдаёт любой адрес вида
+# 51-250-1-2.sslip.io на IP 51.250.1.2, и Let's Encrypt такие домены выдаёт.
+
+{$DOMAIN} {
+	encode gzip
+
+	# Ссылка на фид — секрет. Ни поисковикам, ни в чужие логи через Referer.
+	header {
+		X-Robots-Tag "noindex, nofollow"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy web:8000
+}

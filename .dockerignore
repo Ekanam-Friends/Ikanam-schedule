@@ -1,0 +1,25 @@
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+
+# секреты и локальные данные — в образ не попадают
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite*
+data/
+snapshots/
+dumps/
+
+tests
+docs
+.claude
+.idea
+.vscode
