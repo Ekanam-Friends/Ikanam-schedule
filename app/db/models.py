@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Date,
@@ -29,6 +30,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+JsonColumn = JSON().with_variant(JSONB, "postgresql")
+"""JSON, который работает и в PostgreSQL (как JSONB), и в SQLite.
+
+SQLite нужен для локальной разработки и тестов: поднимать Postgres ради
+проверки форматирования сообщения — лишнее трение, из-за которого тесты
+перестают запускать."""
 
 
 class Base(DeclarativeBase):
@@ -62,6 +70,17 @@ class User(Base):
     обновлением чаще, чем необходимо."""
 
     connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    # --- Учебные данные, нужные для запроса расписания ---
+    # Кабинет требует `uid_org` и все группы в `filter[]`; запрашивать их у
+    # `student-groups` перед каждой синхронизацией — лишний запрос к чужому
+    # серверу ради данных, которые меняются раз в семестр.
+    org_uid: Mapped[str | None] = mapped_column(String(64), default=None)
+    student_uid: Mapped[str | None] = mapped_column(String(64), default=None)
+    group_name: Mapped[str | None] = mapped_column(String(64), default=None)
+    """Название основной группы — для «Подключено: ЭИ-25» и ничего больше."""
+
+    group_uids: Mapped[list[str] | None] = mapped_column(JsonColumn, default=None)
 
     # --- Подписка на календарь ---
     feed_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -117,7 +136,7 @@ class ScheduleSnapshot(Base):
     )
     day: Mapped[date] = mapped_column(Date, index=True)
 
-    lessons: Mapped[list[dict]] = mapped_column(JSONB)
+    lessons: Mapped[list[dict]] = mapped_column(JsonColumn)
     """Пары дня в том виде, в каком их нормализовал парсер.
 
     Хранится именно нормализованный вид, а не сырой ответ ЛК: сырой ответ — это

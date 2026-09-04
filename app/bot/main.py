@@ -22,37 +22,47 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import BotCommand, Message
 
 from app.bot.commands import COMMANDS
+from app.bot.deps import AppContext, DependenciesMiddleware
+from app.bot.handlers import account as account_handlers
+from app.bot.handlers import schedule as schedule_handlers
 from app.bot.texts import build_start_message
 from app.core.config import get_settings
+from app.core.crypto import CredentialsCipher
+from app.db.repo import UserRepository
+from app.db.session import create_schema, make_engine, make_session_factory
 
 log = logging.getLogger(__name__)
 
 router = Router(name="core")
 
+IMPLEMENTED = {"start", "login", "logout", "today", "tomorrow", "week", "status"}
+
 NOT_READY = (
-    "Эта команда ещё в разработке — бот пока учится подключать личный кабинет.\n"
-    "Список того, что уже работает: /start"
+    "Эта команда ещё в разработке.\n"
+    "Что уже работает: /login, /today, /tomorrow, /week, /status, /logout"
 )
 
 
 @router.message(CommandStart())
-async def on_start(message: Message) -> None:
-    await message.answer(build_start_message(is_connected=False), disable_web_page_preview=True)
+async def on_start(message: Message, repo: UserRepository) -> None:
+    user = await repo.get(message.from_user.id)
+    connected = user is not None and user.is_connected
+    await message.answer(build_start_message(is_connected=connected), disable_web_page_preview=True)
 
 
 @router.message(Command("help"))
-async def on_help(message: Message) -> None:
+async def on_help(message: Message, repo: UserRepository) -> None:
     # /help не в меню намеренно: это тот же /start, просто люди привыкли
     # набирать именно его, и молчать в ответ — грубо.
-    await on_start(message)
+    await on_start(message, repo)
 
 
-@router.message(Command(*[c.name for c in COMMANDS if c.name != "start"]))
+@router.message(Command(*[c.name for c in COMMANDS if c.name not in IMPLEMENTED]))
 async def on_not_ready(message: Message) -> None:
     """Честная заглушка для команд, которые ещё не реализованы.
 
     Лучше прямо сказать «пока не умею», чем притворяться: человек, получивший
-    молчание на /today, решит, что бот сломан, и больше не вернётся.
+    молчание на команду, решит, что бот сломан, и больше не вернётся.
     """
     await message.answer(NOT_READY)
 
@@ -94,7 +104,20 @@ async def main() -> None:
         session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    engine = make_engine(settings.database_url)
+    await create_schema(engine)
+    context = AppContext(
+        settings=settings,
+        cipher=CredentialsCipher(settings.credentials_key.get_secret_value()),
+        session_factory=make_session_factory(engine),
+    )
+
     dispatcher = Dispatcher()
+    dispatcher.update.middleware(DependenciesMiddleware(context))
+    # Порядок важен: диалог входа должен перехватывать текст раньше, чем
+    # общие обработчики решат, что это неизвестная команда.
+    dispatcher.include_router(account_handlers.router)
+    dispatcher.include_router(schedule_handlers.router)
     dispatcher.include_router(router)
 
     try:
