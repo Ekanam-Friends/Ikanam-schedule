@@ -252,3 +252,46 @@ def test_expiration_survives_garbage():
 
     assert _parse_expiration(None) is None
     assert _parse_expiration("не число") is None
+
+
+# --- Заголовок version и учебные данные ---
+
+
+async def test_every_request_carries_api_version_header():
+    """Без `version` API отвечает 400 HttpVersionException — проверено вживую.
+
+    И это именно `1.0`, а не `currentVersion` из эндпоинта `version`: фронтенд
+    читает оттуда несуществующее поле и всегда шлёт запасное значение.
+    """
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("version", "<нет>"))
+        return httpx.Response(200, json=LOGIN_OK)
+
+    async with client_with(handler, tokens=Tokens("a", "b")) as client:
+        await client.login("a", "b")
+        await client.get_student_groups()
+        await client.get_schedule([date(2026, 9, 4)], ["g"])
+
+    assert seen == ["1.0", "1.0", "1.0"]
+
+
+async def test_student_groups_endpoint_and_auth():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["auth"] = request.headers.get("authorization", "")
+        return httpx.Response(200, json={"items": []})
+
+    async with client_with(handler, tokens=Tokens("tok", "r")) as client:
+        await client.get_student_groups()
+
+    assert seen["path"].endswith("manual/student-groups")
+    assert seen["auth"] == "Bearer tok"
+
+
+def test_client_has_no_way_to_fetch_full_profile():
+    """`profile` отдаёт СНИЛС и адреса; метода для него нет намеренно."""
+    assert not hasattr(RanepaClient, "get_profile")

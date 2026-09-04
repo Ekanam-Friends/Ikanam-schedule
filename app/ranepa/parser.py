@@ -30,7 +30,14 @@ import logging
 from datetime import date, datetime
 from typing import Any
 
-from app.ranepa.models import DaySchedule, Lesson, LessonFormat, Schedule
+from app.ranepa.models import (
+    DaySchedule,
+    EduGroup,
+    Lesson,
+    LessonFormat,
+    Schedule,
+    StudentProfile,
+)
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +150,72 @@ def _split_trailing_parentheses(text: str) -> tuple[str, str | None]:
     auditorium = text[:opening].strip()
     building = text[opening + 1 : -1].strip()
     return (auditorium or text), (building or None)
+
+
+def parse_student_profile(payload: Any) -> StudentProfile:
+    """Собрать `StudentProfile` из ответа `manual/student-groups`.
+
+    Ответ — `{"items": [...]}`, где каждый элемент — одно место обучения.
+    Берётся первое с действующим статусом (или просто первое): случай студента,
+    учащегося сразу в двух местах, в кабинете не наблюдался, и придумывать для
+    него поведение заранее — значит гадать.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise ScheduleParseError("В ответе нет списка items")
+
+    items = [item for item in payload["items"] if isinstance(item, dict)]
+    if not items:
+        raise ScheduleParseError("У студента нет ни одного места обучения")
+
+    active = [i for i in items if _clean(i.get("student_status")).lower() == "студент"]
+    item = (active or items)[0]
+
+    student_uid = _clean(item.get("uid_student"))
+    org_uid = _clean(item.get("uid_org"))
+    if not student_uid or not org_uid:
+        raise ScheduleParseError("В месте обучения нет uid_student или uid_org")
+
+    groups = tuple(
+        group
+        for group in (_parse_group(raw) for raw in item.get("edu_group") or [])
+        if group is not None
+    )
+    if not groups:
+        # Без групп запрос расписания не составить: кабинет требует `filter[]`.
+        raise ScheduleParseError("У студента нет учебных групп")
+
+    return StudentProfile(
+        student_uid=student_uid,
+        org_uid=org_uid,
+        group_name=_clean(item.get("academic_group")),
+        groups=groups,
+        status=_clean(item.get("student_status")) or None,
+        course=_clean(item.get("course")) or None,
+    )
+
+
+def _parse_group(raw: Any) -> EduGroup | None:
+    if not isinstance(raw, dict):
+        return None
+    uid = _clean(raw.get("uid_edu_group"))
+    if not uid:
+        return None
+    return EduGroup(
+        uid=uid,
+        name=_clean(raw.get("edu_group")),
+        starts=_parse_ru_date(raw.get("date_start")),
+        ends=_parse_ru_date(raw.get("date_end")),
+    )
+
+
+def _parse_ru_date(value: Any) -> date | None:
+    """«01.09.2025 0:00:00» — да, в этом же API даты бывают и в таком виде."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.strptime(value.split(" ")[0], "%d.%m.%Y").date()
+    except ValueError:
+        return None
 
 
 def _parse_datetime(value: Any) -> datetime | None:

@@ -142,3 +142,65 @@ def test_capacity_parentheses_are_not_mistaken_for_address():
 
     assert auditorium == "5 - 122 (22) П+ПК"
     assert building is None
+
+
+# --- Учебные данные из manual/student-groups ---
+
+from app.ranepa.parser import parse_student_profile  # noqa: E402
+
+GROUPS_FIXTURE = Path(__file__).parent / "fixtures" / "student_groups.json"
+
+
+@pytest.fixture
+def groups_payload() -> dict:
+    return json.loads(GROUPS_FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_profile_takes_identifiers_and_group_name(groups_payload):
+    profile = parse_student_profile(groups_payload)
+
+    assert profile.student_uid == "id-student-1"
+    assert profile.org_uid == "id-org"
+    assert profile.group_name == "ЭИ-25"
+    assert profile.course == "2-й курс"
+    assert profile.is_active_student
+
+
+def test_profile_collects_all_groups_for_schedule_filter(groups_payload):
+    """Фронтенд шлёт в `filter[]` все группы без фильтра по датам — и мы тоже."""
+    profile = parse_student_profile(groups_payload)
+
+    assert profile.group_uids == ["id-group-1", "id-group-2", "id-group-3"]
+    assert profile.groups[0].name == "ЭИ/ТЭУ-25"
+    assert profile.groups[0].starts == date(2025, 9, 1)
+    assert profile.groups[0].ends == date(2026, 1, 31)
+
+
+def test_profile_keeps_no_personal_fields(groups_payload):
+    """ФИО, номер зачётки и прочее есть в ответе, но в модели их нет."""
+    dumped = repr(parse_student_profile(groups_payload))
+
+    assert "Фамилия" not in dumped
+    assert "000000" not in dumped
+
+
+def test_profile_prefers_active_place_of_study(groups_payload):
+    finished = dict(groups_payload["items"][0], uid_student="id-old", student_status="Отчислен")
+    groups_payload["items"].insert(0, finished)
+
+    assert parse_student_profile(groups_payload).student_uid == "id-student-1"
+
+
+def test_profile_without_groups_is_an_error(groups_payload):
+    """Без `filter[]` кабинет не отдаст расписание — молча продолжать нельзя."""
+    groups_payload["items"][0]["edu_group"] = []
+
+    with pytest.raises(ScheduleParseError):
+        parse_student_profile(groups_payload)
+
+
+def test_profile_rejects_foreign_structure():
+    with pytest.raises(ScheduleParseError):
+        parse_student_profile({"item": {}})
+    with pytest.raises(ScheduleParseError):
+        parse_student_profile({"items": []})

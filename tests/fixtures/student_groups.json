@@ -1,0 +1,67 @@
+{
+  "items": [
+    {
+      "uid_student": "id-student-1",
+      "student": "Фамилия Имя Отчество",
+      "student_status": "Студент",
+      "uid_org": "id-org",
+      "org": "РАНХиГС",
+      "org_abbr": "РАНХиГС",
+      "uid_study_place": "id-place",
+      "study_place": "Институт экономики, математики и информационных технологий",
+      "uid_study_site": "id-site",
+      "study_site": "Москва, Вернадского",
+      "uid_edu_program": "id-program",
+      "edu_program_title": "Прикладная информатика",
+      "order_data_come_into_force": "01.09.2024 0:00:00",
+      "uid_edu_form": "id-form",
+      "edu_form": "Очная",
+      "uid_Osnova": "id-osnova",
+      "osnova": "Бюджетная основа",
+      "uid_direction": "id-direction",
+      "direction": "Экономика",
+      "direction_code": "38.03.01",
+      "uid_qualification": "id-qual",
+      "qualification": "Бакалавр",
+      "uid_program_type": "id-ptype",
+      "program_type": "Бакалавриат",
+      "uid_academic_group": "id-group-academic",
+      "academic_group": "ЭИ-25",
+      "is_finished": false,
+      "is_success": false,
+      "uid_student_status": "id-status",
+      "student_title": "Студент",
+      "student_title_full": "Студент 2 курса",
+      "uid_year": "id-year",
+      "year": "2025 / 2026",
+      "number_grade_book": "000000",
+      "obj_flags": {},
+      "edu_group": [
+        {
+          "edu_group": "ЭИ/ТЭУ-25",
+          "uid_edu_group": "id-group-1",
+          "date_start": "01.09.2025 0:00:00",
+          "date_end": "31.01.2026 0:00:00"
+        },
+        {
+          "edu_group": "ЭИ-25",
+          "uid_edu_group": "id-group-2",
+          "date_start": "01.09.2025 0:00:00",
+          "date_end": "31.01.2026 0:00:00"
+        },
+        {
+          "edu_group": "ЭИ-25-102/3",
+          "uid_edu_group": "id-group-3",
+          "date_start": "01.09.2025 0:00:00",
+          "date_end": "31.01.2026 0:00:00"
+        }
+      ],
+      "is_modeus_agreement_needed": false,
+      "course": "2-й курс",
+      "order_number": "0000",
+      "order_data": "01.09.2024 0:00:00"
+    }
+  ],
+  "clientVersion": 1,
+  "bitrix": "manual/student-groups"
+}

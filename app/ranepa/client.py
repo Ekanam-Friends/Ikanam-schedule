@@ -31,6 +31,14 @@ DEFAULT_BASE_URL = "https://my.ranepa.ru/lk/n-api/"
 MAIN_ORG_UID = "7923e704-99aa-11e5-bed4-c48508aa74e4"
 """Головная организация. У филиалов свой `uid_org`, он приходит в профиле."""
 
+API_VERSION = "1.0"
+"""Значение заголовка `version`, без которого API отвечает 400
+`HttpVersionException: the request requires header with version number`.
+
+Именно `1.0`, а не то, что отдаёт эндпоинт `version` (`currentVersion: 1.7`):
+фронтенд кабинета читает из его ответа поле `version`, которого там нет, и
+всегда шлёт запасное значение. Повторяем поведение фронтенда, а не документацию."""
+
 BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -40,6 +48,8 @@ BROWSER_HEADERS = {
     "Accept-Language": "ru-RU,ru;q=0.9",
     "Origin": "https://my.ranepa.ru",
     "Referer": "https://my.ranepa.ru/lk/student/schedule",
+    "version": API_VERSION,
+    "X-User-Timezone": "+03:00",
 }
 
 
@@ -160,8 +170,15 @@ class RanepaClient:
 
     # --- Данные ---
 
-    async def get_profile(self) -> dict[str, Any]:
-        return await self._request("GET", "profile", authorized=True)
+    async def get_student_groups(self) -> dict[str, Any]:
+        """Учебные данные студента: организация, группа, список групп для расписания.
+
+        Метода для `profile` здесь нет намеренно. Тот эндпоинт отдаёт полную
+        анкету — СНИЛС, дату рождения, адреса, — а всё, что нужно нам
+        (`uid_student`, `uid_org`, группы), есть в `manual/student-groups`.
+        Данных, которые мы не запрашиваем, не окажется ни в логах, ни в базе.
+        """
+        return await self._request("GET", "manual/student-groups", authorized=True)
 
     async def get_schedule(
         self,

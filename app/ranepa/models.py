@@ -89,6 +89,46 @@ class Lesson:
         return changes
 
 
+@dataclass(frozen=True, slots=True)
+class EduGroup:
+    """Учебная группа студента с периодом действия."""
+
+    uid: str
+    name: str
+    starts: date | None = None
+    ends: date | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StudentProfile:
+    """То немногое из учебных данных студента, что нужно для расписания.
+
+    Здесь нет ни ФИО, ни контактов — кабинет их отдаёт, но для запроса
+    расписания нужны только идентификаторы. Поле `group_name` — единственное
+    человекочитаемое, оно для приветствия «Подключено: ЭИ-25».
+    """
+
+    student_uid: str
+    org_uid: str
+    group_name: str
+    groups: tuple[EduGroup, ...]
+    status: str | None = None
+    course: str | None = None
+
+    @property
+    def group_uids(self) -> list[str]:
+        """Все группы для `filter[]` — ровно так же шлёт их фронтенд кабинета.
+
+        Фильтровать по датам действия соблазнительно, но фронтенд этого не
+        делает, а расхождение с ним означало бы расписание, отличное от того,
+        что студент видит в кабинете."""
+        return [group.uid for group in self.groups]
+
+    @property
+    def is_active_student(self) -> bool:
+        return self.status is None or self.status.lower() == "студент"
+
+
 @dataclass(slots=True)
 class DaySchedule:
     """Занятия одного дня, отсортированные по времени начала."""
