@@ -61,14 +61,22 @@ class ScheduleSyncService:
         today = today or datetime.now(timezone.utc).astimezone(MOSCOW_OFFSET).date()
         days = [today + timedelta(days=offset) for offset in range(horizon_days)]
 
-        tokens = Tokens(access_token="", refresh_token=refresh_token, expires_at=None)
+        tokens = Tokens(
+            access_token="",
+            refresh_token=refresh_token,
+            expires_at=None,
+            fszet=self._repo.fszet_of(user),
+        )
         async with self._client_factory(tokens=tokens) as client:
             try:
                 # Access-токен не хранится, поэтому каждая синхронизация
                 # начинается с обновления. Заодно получаем свежий refresh.
                 tokens = await client.refresh()
                 await self._repo.update_tokens(
-                    user, refresh_token=tokens.refresh_token, access_valid_until=tokens.expires_at
+                    user,
+                    refresh_token=tokens.refresh_token,
+                    access_valid_until=tokens.expires_at,
+                    fszet=tokens.fszet,
                 )
                 raw = await client.get_schedule(days, user.group_uids, org_uid=user.org_uid)
             except AuthError as exc:

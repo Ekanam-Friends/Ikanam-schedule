@@ -54,10 +54,12 @@ class UserRepository:
         refresh_token: str,
         access_valid_until: datetime | None,
         profile: StudentProfile,
+        fszet: str | None = None,
     ) -> User:
         """Сохранить результат успешного входа. Пароля здесь нет — и не будет."""
         user = await self.get_or_create(telegram_id)
         user.refresh_token_encrypted = self._cipher.encrypt(refresh_token)
+        user.fszet_encrypted = self._cipher.encrypt(fszet) if fszet else None
         user.access_valid_until = access_valid_until
         user.connected_at = datetime.now(timezone.utc)
         user.org_uid = profile.org_uid
@@ -75,13 +77,25 @@ class UserRepository:
             return None
         return self._cipher.decrypt(user.refresh_token_encrypted)
 
+    def fszet_of(self, user: User) -> str | None:
+        if not user.fszet_encrypted:
+            return None
+        return self._cipher.decrypt(user.fszet_encrypted)
+
     async def update_tokens(
-        self, user: User, *, refresh_token: str, access_valid_until: datetime | None
+        self,
+        user: User,
+        *,
+        refresh_token: str,
+        access_valid_until: datetime | None,
+        fszet: str | None = None,
     ) -> None:
         # Кабинет выдаёт новую пару на каждое обновление; старый refresh-токен
         # после этого мёртв, так что не сохранить новый — значит потерять доступ.
         user.refresh_token_encrypted = self._cipher.encrypt(refresh_token)
         user.access_valid_until = access_valid_until
+        if fszet:
+            user.fszet_encrypted = self._cipher.encrypt(fszet)
         await self._session.flush()
 
     async def mark_synced(self, user: User, *, when: datetime) -> None:
@@ -98,6 +112,7 @@ class UserRepository:
             # кабинет. Данные не трогаем — снапшоты продолжают отдаваться в фид.
             user.is_active = False
             user.refresh_token_encrypted = None
+            user.fszet_encrypted = None
         await self._session.flush()
 
     async def rotate_feed_token(self, user: User) -> str:

@@ -309,3 +309,38 @@ async def test_student_groups_endpoint_and_auth():
 def test_client_has_no_way_to_fetch_full_profile():
     """`profile` отдаёт СНИЛС и адреса; метода для него нет намеренно."""
     assert not hasattr(RanepaClient, "get_profile")
+
+
+# --- fszet: второй секрет входа ---
+
+
+async def test_login_keeps_fszet_and_refresh_sends_it_as_header():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("auth/login"):
+            return httpx.Response(200, json={**LOGIN_OK, "fszet": "fz-secret"})
+        seen["fszet"] = request.headers.get("fszet")
+        return httpx.Response(200, json={"access_token": "a2", "refresh_token": "r2"})
+
+    async with client_with(handler) as client:
+        tokens = await client.login("a", "b")
+        assert tokens.fszet == "fz-secret"
+
+        refreshed = await client.refresh()
+
+    assert seen["fszet"] == "fz-secret"
+    assert refreshed.fszet == "fz-secret", "refresh не возвращает fszet — прежний должен сохраниться"
+
+
+async def test_refresh_without_fszet_sends_no_empty_header():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["has"] = "fszet" in request.headers
+        return httpx.Response(200, json={"access_token": "a2", "refresh_token": "r2"})
+
+    async with client_with(handler, tokens=Tokens("a", "r")) as client:
+        await client.refresh()
+
+    assert seen["has"] is False

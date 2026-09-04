@@ -85,6 +85,7 @@ class AccountService:
             refresh_token=tokens.refresh_token,
             access_valid_until=tokens.expires_at,
             profile=profile,
+            fszet=tokens.fszet,
         )
 
         # Первая синхронизация — сразу, чтобы /today заработал в ту же минуту.

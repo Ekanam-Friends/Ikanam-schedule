@@ -60,6 +60,10 @@ class User(Base):
     # ещё в нескольких местах.
     refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, default=None)
 
+    fszet_encrypted: Mapped[str | None] = mapped_column(Text, default=None)
+    """Второй секрет входа: без заголовка `fszet` кабинет не продлевает токен.
+    Хранится так же, как refresh-токен, и удаляется вместе с ним."""
+
     access_valid_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )

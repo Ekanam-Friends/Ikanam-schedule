@@ -27,7 +27,7 @@ from app.services.sync import ReauthRequired, ScheduleSyncService, SyncError
 FIXTURES = Path(__file__).parent / "fixtures"
 SCHEDULE = json.loads((FIXTURES / "schedule_response.json").read_text(encoding="utf-8"))
 GROUPS = json.loads((FIXTURES / "student_groups.json").read_text(encoding="utf-8"))
-TOKENS = {"access_token": "acc-1", "refresh_token": "ref-1", "exp": 1788600000000}
+TOKENS = {"access_token": "acc-1", "refresh_token": "ref-1", "exp": 1788600000000, "fszet": "fz-1"}
 TOKENS_2 = {"access_token": "acc-2", "refresh_token": "ref-2", "exp": 1788600000000}
 
 
@@ -41,6 +41,7 @@ class FakeCabinet:
         self.groups_response = httpx.Response(200, json=GROUPS)
         self.schedule_response = httpx.Response(200, json=SCHEDULE)
         self.seen_password: str | None = None
+        self.seen_refresh_fszet: str | None = None
         self.seen_schedule_params = None
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -52,6 +53,7 @@ class FakeCabinet:
                 self.seen_password = body.split('name="password"')[1].split("\r\n\r\n")[1].split("\r\n")[0]
             return self.login_response
         if path.endswith("auth/refresh"):
+            self.seen_refresh_fszet = request.headers.get("fszet")
             return self.refresh_response
         if path.endswith("student-groups"):
             return self.groups_response
@@ -229,3 +231,16 @@ async def test_disconnect(services, repo):
 
     assert await account.disconnect(42) is True
     assert await repo.get(42) is None
+
+
+async def test_refresh_carries_fszet_from_login(services, cabinet, repo):
+    """Без заголовка `fszet` кабинет отвечает на refresh 400 — проверено вживую."""
+    account, sync = services
+    await account.connect(42, "l", "p")
+    assert cabinet.seen_refresh_fszet == "fz-1"
+
+    cabinet.seen_refresh_fszet = None
+    await sync.sync_user(await repo.get(42))
+
+    assert cabinet.seen_refresh_fszet == "fz-1"
+    assert repo.fszet_of(await repo.get(42)) == "fz-1"

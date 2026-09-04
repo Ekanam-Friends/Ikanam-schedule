@@ -84,6 +84,10 @@ class Tokens:
     access_token: str
     refresh_token: str
     expires_at: datetime | None = None
+    fszet: str | None = None
+    """Второй секрет из ответа на вход. Фронтенд кладёт его в localStorage и
+    отправляет заголовком `fszet` при каждом `auth/refresh`; без него кабинет
+    отвечает 400. Что это, кабинет не объясняет, — повторяем поведение."""
 
     @property
     def is_expired(self) -> bool:
@@ -155,12 +159,24 @@ class RanepaClient:
         if self.tokens is None:
             raise AuthError("Нет токенов: сначала нужно войти")
 
+        headers = {"fszet": self.tokens.fszet} if self.tokens.fszet else {}
         response = await self._request(
             "POST",
             "auth/refresh",
             json={"refresh_token": self.tokens.refresh_token},
+            headers=headers,
         )
-        self.tokens = _tokens_from_payload(response)
+        refreshed = _tokens_from_payload(response)
+        if refreshed.fszet is None:
+            # Ответ на refresh новый fszet не содержит — фронтенд после
+            # обновления его не перезаписывает. Несём прежний дальше.
+            refreshed = Tokens(
+                access_token=refreshed.access_token,
+                refresh_token=refreshed.refresh_token,
+                expires_at=refreshed.expires_at,
+                fszet=self.tokens.fszet,
+            )
+        self.tokens = refreshed
         return self.tokens
 
     async def ensure_access(self) -> None:
@@ -221,7 +237,9 @@ class RanepaClient:
         attempts: int = 4,
         **kwargs: Any,
     ) -> Any:
-        headers: dict[str, str] = {}
+        # Заголовки вызова (например, `fszet` у refresh) и авторизация — в одном
+        # словаре: httpx принимает `headers` только один раз.
+        headers: dict[str, str] = dict(kwargs.pop("headers", None) or {})
         if authorized:
             if self.tokens is None:
                 raise AuthError("Нет токена доступа")
@@ -267,7 +285,11 @@ class RanepaClient:
             raise TemporaryError(f"Кабинет ответил {response.status_code}")
 
         if response.status_code >= 400:
-            raise RanepaError(f"Неожиданный ответ кабинета: {response.status_code}")
+            # Путь и причина из JSON — иначе в /status видно только «400», и
+            # понять, какой из четырёх запросов не понравился кабинету, нельзя.
+            path = response.request.url.path.rsplit("n-api/", 1)[-1]
+            reason = _cabinet_message(response) or "без объяснения"
+            raise RanepaError(f"{path}: {response.status_code}, {reason}")
 
         try:
             return response.json()
@@ -314,7 +336,13 @@ def _tokens_from_payload(payload: Any) -> Tokens:
         raise AuthError(f"Вход не выполнен: {message}")
 
     expires_at = _parse_expiration(payload.get("exp"))
-    return Tokens(access_token=access, refresh_token=refresh, expires_at=expires_at)
+    fszet = payload.get("fszet")
+    return Tokens(
+        access_token=access,
+        refresh_token=refresh,
+        expires_at=expires_at,
+        fszet=fszet if isinstance(fszet, str) and fszet else None,
+    )
 
 
 def _parse_expiration(raw: Any) -> datetime | None:
