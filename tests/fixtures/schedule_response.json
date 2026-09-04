@@ -1,0 +1,78 @@
+{
+  "uid_org": "id-org",
+  "days": [
+    {
+      "date": "2026-09-23T00:00:00",
+      "discs": [
+        {
+          "start_date": "2026-09-23T15:40:00",
+          "end_date": "2026-09-23T17:00:00",
+          "comment": null,
+          "uid_status": "id-status-1",
+          "status": "Добавление",
+          "uid_room": "id-room-1",
+          "room": "5 - 122 (22) П+ПК (Вернадского, 82 - корпус 5)",
+          "uid_disc": "id-disc-1",
+          "disc": "Математический анализ",
+          "uid_type": "id-type-1",
+          "type": "Практические занятия",
+          "uid_lecturer": "id-lecturer-1",
+          "lecturer": "Сидоров Пётр Алексеевич",
+          "groups": {"id-group-1": "ПИ-101", "id-group-2": "ПИ-102"},
+          "lms_link": null,
+          "sam_login": "lecturer1",
+          "sam_email": "lecturer1@example.org"
+        },
+        {
+          "start_date": "2026-09-23T14:00:00",
+          "end_date": "2026-09-23T15:20:00",
+          "comment": null,
+          "uid_status": "id-status-1",
+          "status": "Добавление",
+          "uid_room": "id-room-2",
+          "room": "Уточняется",
+          "uid_disc": "id-disc-1",
+          "disc": "Математический анализ",
+          "uid_type": "id-type-1",
+          "type": "Практические занятия",
+          "uid_lecturer": "id-lecturer-2",
+          "lecturer": "Петрова Мария Сергеевна",
+          "groups": {"id-group-1": "ПИ-101"},
+          "lms_link": null,
+          "sam_login": "lecturer2",
+          "sam_email": "lecturer2@example.org"
+        }
+      ]
+    },
+    {
+      "date": "2026-09-01T00:00:00",
+      "discs": [
+        {
+          "start_date": "2026-09-01T10:40:00",
+          "end_date": "2026-09-01T12:00:00",
+          "comment": null,
+          "uid_status": "id-status-1",
+          "status": "Добавление",
+          "uid_room": "id-room-3",
+          "room": "СДО - СДО / дистанционно (СДО / дистанционно)",
+          "uid_disc": "id-disc-2",
+          "disc": "Философия: основные картины мира",
+          "uid_type": "id-type-2",
+          "type": "Лекционные занятия",
+          "uid_lecturer": "id-lecturer-3",
+          "lecturer": "Иванов Иван Иванович",
+          "groups": {"id-group-1": "ПИ-101"},
+          "lms_link": "https://lms.example.org/course/42",
+          "sam_login": "lecturer3",
+          "sam_email": "lecturer3@example.org"
+        }
+      ]
+    },
+    {
+      "date": "2026-09-05T00:00:00",
+      "discs": []
+    }
+  ],
+  "clientVersion": 1,
+  "bitrix": "schedule/get"
+}
