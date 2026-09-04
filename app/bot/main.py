@@ -31,7 +31,8 @@ from app.bot.texts import build_start_message
 from app.core.config import get_settings
 from app.core.crypto import CredentialsCipher
 from app.db.repo import UserRepository
-from app.db.session import create_schema, make_engine, make_session_factory
+from app.db.migrate import upgrade_to_head
+from app.db.session import make_engine, make_session_factory
 
 log = logging.getLogger(__name__)
 
@@ -126,8 +127,10 @@ async def main() -> None:
     # Повторы на каждый исходящий вызов: прокси до Telegram рвёт часть
     # соединений, и без этого ответы пользователям просто теряются.
     bot.session.middleware(RetryOnNetworkError())
+    # Миграции — до первого апдейта. Обновление кода не должно требовать ни
+    # ручных команд, ни пересоздания базы с потерей подключённых кабинетов.
+    await upgrade_to_head(settings.database_url)
     engine = make_engine(settings.database_url)
-    await create_schema(engine)
     context = AppContext(
         settings=settings,
         cipher=CredentialsCipher(settings.credentials_key.get_secret_value()),
