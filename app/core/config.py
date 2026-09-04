@@ -1,0 +1,82 @@
+"""Настройки приложения.
+
+Все секреты читаются из окружения — в репозитории лежит только `.env.example`
+с пустыми значениями. Приложение падает на старте, если чего-то не хватает:
+лучше не подняться совсем, чем работать половиной функций и молча не отдавать
+пользователям расписание.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # --- Telegram ---
+    bot_token: SecretStr = Field(alias="BOT_TOKEN")
+    owner_chat_id: int | None = Field(default=None, alias="OWNER_CHAT_ID")
+    """Куда бот пишет, что синхронизация сломалась. Без него о поломке узнают
+    только пользователи, а это ровно тот сценарий, который убивает такие проекты."""
+
+    # --- Шифрование учётных данных пользователей ---
+    credentials_key: SecretStr = Field(alias="CREDENTIALS_KEY")
+
+    # --- База ---
+    database_url: str = Field(alias="DATABASE_URL")
+
+    # --- Публичный ICS-фид ---
+    public_base_url: str = Field(alias="PUBLIC_BASE_URL")
+    """Внешний адрес сервиса. Из него собираются ссылки-подписки, поэтому он
+    обязан быть тем, что видит календарь пользователя, а не localhost."""
+
+    # --- Источник ---
+    ranepa_base_url: str = Field(default="https://my.ranepa.ru", alias="RANEPA_BASE_URL")
+    sync_hour_msk: int = Field(default=3, ge=0, le=23, alias="SYNC_HOUR_MSK")
+    sync_concurrency: int = Field(default=4, ge=1, le=32, alias="SYNC_CONCURRENCY")
+    """Сколько аккаунтов синхронизируются одновременно. Держим низким осознанно:
+    несколько сотен логинов с одного адреса — заметная нагрузка на чужой сервер,
+    и лишний повод для его администраторов заблокировать наш IP."""
+
+    @field_validator("public_base_url", "ranepa_base_url")
+    @classmethod
+    def _strip_trailing_slash(cls, value: str) -> str:
+        return value.rstrip("/")
+
+    @field_validator("owner_chat_id", mode="before")
+    @classmethod
+    def _empty_means_absent(cls, value: object) -> object:
+        """Пустая строка в `.env` — это «не задано», а не ошибка.
+
+        Необязательные переменные в `.env` принято оставлять пустыми, а не
+        удалять строку целиком; без этой обработки приложение не поднимется.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    def feed_url(self, token: str) -> str:
+        """Ссылка на персональный ICS-фид."""
+        return f"{self.public_base_url}/feed/{token}.ics"
+
+    def webcal_url(self, token: str) -> str:
+        """Та же ссылка со схемой `webcal://`.
+
+        iOS и macOS по такой ссылке сразу предлагают добавить подписку, тогда как
+        `https://` они просто скачают как файл — и пользователь получит разовый
+        импорт вместо подписки, сам того не заметив.
+        """
+        return self.feed_url(token).replace("https://", "webcal://", 1)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()  # type: ignore[call-arg]
