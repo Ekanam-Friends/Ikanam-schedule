@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from icalendar import Alarm, Calendar, Event
+from icalendar import Alarm, Calendar, Event, vDuration
 
 from app.ranepa.models import Lesson, Schedule
 
@@ -69,10 +69,19 @@ def build_calendar(
     if for_subscription:
         # Обе строки означают одно и то же: первая — современная (RFC 7986),
         # вторая — то, что понимают старые клиенты.
-        calendar.add("refresh-interval;value=duration", timedelta(hours=4))
-        calendar.add("x-published-ttl", timedelta(hours=4))
+        #
+        # Длительность обязана быть в формате ISO 8601 (`PT4H`). Библиотека не
+        # приводит `timedelta` к нему сама для нестандартных свойств и пишет
+        # `4:00:00`, что клиенты молча игнорируют, — отсюда явный `vDuration`.
+        interval = vDuration(timedelta(hours=4))
+        calendar.add("refresh-interval", interval, parameters={"VALUE": "DURATION"})
+        calendar.add("x-published-ttl", interval)
 
-    stamp = datetime.now(timezone.utc)
+    # Штамп версии — это время, когда данные были получены, а не когда собран
+    # ответ. Иначе документ отличается при каждом запросе: подписка перестаёт
+    # кэшироваться (`ETag` всегда новый), а клиенты видят все пары изменёнными,
+    # потому что у них каждый раз новый `LAST-MODIFIED`.
+    stamp = _as_utc(schedule.fetched_at) if schedule.fetched_at else datetime.now(timezone.utc)
     for lesson in schedule.lessons:
         sequence = (sequences or {}).get(lesson.uid, 0)
         calendar.add_component(

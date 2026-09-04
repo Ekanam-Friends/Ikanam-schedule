@@ -180,3 +180,33 @@ def test_short_name_leaves_unusual_input_alone():
     """Испорченная фамилия в заголовке заметнее, чем несокращённая."""
     assert short_name("Смирнов") == "Смирнов"
     assert short_name("Петров А.И.") == "Петров А."
+
+
+def test_refresh_interval_uses_iso_duration():
+    """`4:00:00` вместо `PT4H` клиенты молча игнорируют."""
+    raw = build_calendar(make_schedule(make_lesson()), for_subscription=True).decode("utf-8")
+
+    assert "REFRESH-INTERVAL;VALUE=DURATION:PT4H" in raw
+    assert "X-PUBLISHED-TTL;VALUE=DURATION:PT4H" in raw
+    assert "4:00:00" not in raw
+
+
+def test_same_data_produces_identical_document():
+    """Иначе `ETag` меняется на каждом запросе и подписка не кэшируется,
+    а клиенты считают все пары изменёнными."""
+    schedule = make_schedule(make_lesson())
+    schedule.fetched_at = datetime(2026, 9, 4, 3, 0)
+
+    first = build_calendar(schedule, for_subscription=True)
+    second = build_calendar(schedule, for_subscription=True)
+
+    assert first == second
+
+
+def test_stamp_follows_fetch_time():
+    schedule = make_schedule(make_lesson())
+    schedule.fetched_at = datetime(2026, 9, 4, 3, 0)
+
+    raw = build_calendar(schedule).decode("utf-8")
+
+    assert "DTSTAMP:20260904T000000Z" in raw
