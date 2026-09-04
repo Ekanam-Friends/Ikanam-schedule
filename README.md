@@ -1,4 +1,4 @@
-# lkanam-schedule
+# Ikanam-schedule
 
 Telegram-бот, который забирает личное расписание студента из личного кабинета РАНХиГС
 и отдаёт его тремя способами: текстом в чате, файлом `.ics` и **ссылкой-подпиской**,
@@ -65,8 +65,8 @@ HTTP-фид (FastAPI)  ─┘           │
 ## Self-host
 
 ```bash
-git clone https://github.com/Ekanam-Friends/lkanam-schedule.git
-cd lkanam-schedule
+git clone https://github.com/Ekanam-Friends/Ikanam-schedule.git
+cd Ikanam-schedule
 cp .env.example .env      # заполни BOT_TOKEN, CREDENTIALS_KEY, PUBLIC_BASE_URL
 docker compose up -d
 ```
