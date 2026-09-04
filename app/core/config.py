@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     """Куда бот пишет, что синхронизация сломалась. Без него о поломке узнают
     только пользователи, а это ровно тот сценарий, который убивает такие проекты."""
 
+    telegram_proxy: str | None = Field(default=None, alias="TELEGRAM_PROXY")
+    """Прокси до api.telegram.org, например `socks5://user:pass@host:1080`.
+
+    Нужен там, где Telegram недоступен напрямую. Кабинет РАНХиГС при этом
+    требует российский адрес, так что прокси касается только Telegram —
+    запросы к кабинету через него не идут."""
+
     # --- Шифрование учётных данных пользователей ---
     credentials_key: SecretStr = Field(alias="CREDENTIALS_KEY")
 

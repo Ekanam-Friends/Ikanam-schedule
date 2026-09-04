@@ -107,6 +107,11 @@ class RanepaClient:
             timeout=timeout,
             transport=transport,
             follow_redirects=True,
+            # Прокси из окружения (HTTPS_PROXY) не трогаем принципиально. Он
+            # нужен для Telegram, который из России заблокирован, — а кабинет,
+            # наоборот, требует российский адрес и показывает капчу зарубежному.
+            # Пропустить его через тот же прокси значит сломать вход.
+            trust_env=False,
         )
         self.tokens = tokens
 
