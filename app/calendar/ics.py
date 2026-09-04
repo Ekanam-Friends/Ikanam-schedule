@@ -125,21 +125,51 @@ def _build_alarm(minutes: int, lesson: Lesson) -> Alarm:
 
 
 def _summary(lesson: Lesson) -> str:
+    """Заголовок события.
+
+    В дневной сетке телефона видно только заголовок, время и место, — поэтому
+    преподаватель попадает сюда, а не остаётся в описании, которое нужно
+    открывать отдельно. Фамилия с инициалами вместо полного ФИО: заголовок и так
+    обрезается в узкой колонке.
+    """
     title = lesson.subject
+    if lesson.teacher:
+        title = f"{title} · {short_name(lesson.teacher)}"
     if lesson.cancelled:
         return f"Отменено: {title}"
     return title
 
 
 def _description(lesson: Lesson) -> str:
+    """Подробности, которые видно при открытии события."""
     lines: list[str] = []
     if lesson.teacher:
         lines.append(lesson.teacher)
     if lesson.lesson_type:
         lines.append(lesson.lesson_type)
+    if lesson.location:
+        lines.append(lesson.location)
     if lesson.cancelled:
         lines.append("Занятие отменено")
     return "\n".join(lines)
+
+
+def short_name(full_name: str) -> str:
+    """«Козко Артем Иванович» → «Козко А. И.».
+
+    Если имя пришло уже сокращённым или состоит из одного слова, возвращается
+    как есть: угадывать структуру чужого ФИО — плохая идея, а испорченная
+    фамилия в заголовке заметнее, чем несокращённая.
+    """
+    parts = full_name.split()
+    if len(parts) < 2:
+        return full_name
+
+    surname, rest = parts[0], parts[1:]
+    initials = [f"{part[0].upper()}." for part in rest if part and part[0].isalpha()]
+    if not initials:
+        return full_name
+    return f"{surname} {' '.join(initials)}"
 
 
 def _as_utc(moment: datetime) -> datetime:

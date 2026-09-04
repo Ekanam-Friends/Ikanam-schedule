@@ -11,7 +11,7 @@ from datetime import date, datetime
 
 from icalendar import Calendar as ParsedCalendar
 
-from app.calendar.ics import build_calendar
+from app.calendar.ics import build_calendar, short_name
 from app.ranepa.models import DaySchedule, Lesson, LessonFormat, Schedule
 
 
@@ -133,3 +133,50 @@ def test_diff_describes_changes_in_russian():
 
     assert any("время" in c for c in changes)
     assert any("аудитория" in c for c in changes)
+
+
+# --- Что обязано попасть в календарь: место, время, преподаватель ---
+
+
+def test_summary_shows_teacher_next_to_subject():
+    """В дневной сетке видно только заголовок — преподаватель должен быть в нём."""
+    raw = build_calendar(make_schedule(make_lesson()))
+    summary = str(events(raw)[0]["SUMMARY"])
+
+    assert "Математический анализ" in summary
+    assert "Козко А. И." in summary
+
+
+def test_description_keeps_full_name_and_place():
+    raw = build_calendar(make_schedule(make_lesson()))
+    description = str(events(raw)[0]["DESCRIPTION"])
+
+    assert "Козко Артем Иванович" in description
+    assert "5 - 406 (24) П+ПК" in description
+
+
+def test_lesson_without_teacher_keeps_clean_title():
+    raw = build_calendar(make_schedule(make_lesson(teacher=None)))
+    summary = str(events(raw)[0]["SUMMARY"])
+
+    assert summary == "Математический анализ"
+    assert "·" not in summary
+
+
+def test_cancelled_lesson_still_names_teacher():
+    raw = build_calendar(make_schedule(make_lesson(cancelled=True)))
+    summary = str(events(raw)[0]["SUMMARY"])
+
+    assert summary.startswith("Отменено:")
+    assert "Козко А. И." in summary
+
+
+def test_short_name_handles_two_and_three_parts():
+    assert short_name("Козко Артем Иванович") == "Козко А. И."
+    assert short_name("Иванова Мария") == "Иванова М."
+
+
+def test_short_name_leaves_unusual_input_alone():
+    """Испорченная фамилия в заголовке заметнее, чем несокращённая."""
+    assert short_name("Смирнов") == "Смирнов"
+    assert short_name("Петров А.И.") == "Петров А."
