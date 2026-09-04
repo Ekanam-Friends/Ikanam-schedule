@@ -42,11 +42,26 @@ class User(Base):
 
     telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
-    # --- Учётные данные личного кабинета ---
-    # Оба поля зашифрованы: логин — это персональные данные, и в дампе базы ему
-    # рядом с расписанием делать нечего.
-    login_encrypted: Mapped[str | None] = mapped_column(Text, default=None)
-    password_encrypted: Mapped[str | None] = mapped_column(Text, default=None)
+    # --- Доступ к личному кабинету ---
+    # Пароля здесь нет и быть не должно. Кабинет умеет продлевать доступ по
+    # refresh-токену (`auth/refresh`), поэтому пароль нужен ровно один раз — в
+    # момент подключения, — живёт в памяти секунды и никуда не записывается.
+    #
+    # Разница не косметическая: refresh-токен даёт доступ к одному кабинету и
+    # обнуляется одной командой, а пароль почти наверняка используется человеком
+    # ещё в нескольких местах.
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, default=None)
+
+    access_valid_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    """До какого момента действует последний полученный access-токен.
+
+    Сам access-токен не хранится: он живёт минуты и запрашивается заново на
+    каждую синхронизацию. В базе от него нужен только срок — чтобы не ходить за
+    обновлением чаще, чем необходимо."""
+
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     # --- Подписка на календарь ---
     feed_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -65,8 +80,9 @@ class User(Base):
 
     # --- Состояние синхронизации ---
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    """Снимается, когда пароль перестал подходить: продолжать долбиться в чужой
-    личный кабинет неверными данными — верный способ получить блокировку."""
+    """Снимается, когда refresh-токен перестал приниматься: продолжать долбиться
+    в чужой личный кабинет мёртвым токеном — верный способ получить блокировку.
+    Такого пользователя нужно попросить подключить кабинет заново."""
 
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_sync_error: Mapped[str | None] = mapped_column(Text, default=None)
@@ -84,8 +100,9 @@ class User(Base):
     )
 
     @property
-    def has_credentials(self) -> bool:
-        return bool(self.login_encrypted and self.password_encrypted)
+    def is_connected(self) -> bool:
+        """Есть ли у бота действующий доступ к кабинету этого человека."""
+        return bool(self.refresh_token_encrypted)
 
 
 class ScheduleSnapshot(Base):

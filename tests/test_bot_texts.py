@@ -43,6 +43,22 @@ def test_start_is_honest_about_credentials():
     assert "/logout" in message
 
 
+def test_start_promises_exactly_what_the_code_does():
+    """Обещание «пароль не храню» должно совпадать со схемой базы.
+
+    Если из `User` когда-нибудь снова появится поле с паролем, этот тест
+    напомнит, что текст в боте стал неправдой.
+    """
+    from app.db.models import User
+
+    message = build_start_message()
+    columns = set(User.__table__.columns.keys())
+
+    assert "Пароль я не храню" in message
+    assert not [name for name in columns if "password" in name]
+    assert "refresh_token_encrypted" in columns
+
+
 def test_start_hints_where_to_begin_only_when_needed():
     fresh = build_start_message(is_connected=False)
     connected = build_start_message(is_connected=True)
