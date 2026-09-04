@@ -124,6 +124,26 @@ class User(Base):
         return bool(self.refresh_token_encrypted)
 
 
+class DialogState(Base):
+    """Состояние диалога с пользователем (FSM aiogram).
+
+    В памяти процесса его держать нельзя: бот перезапускается при деплое, и
+    человек, набравший пароль через секунду после рестарта, получает молчание
+    вместо ответа — а пароль остаётся висеть в чате. Проверено на себе.
+    """
+
+    __tablename__ = "dialog_states"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    """`bot_id:chat_id:user_id` — так aiogram различает диалоги."""
+
+    state: Mapped[str | None] = mapped_column(String(128), default=None)
+    data: Mapped[dict] = mapped_column(JsonColumn, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ScheduleSnapshot(Base):
     """Расписание одного дня, каким его в последний раз отдал личный кабинет."""
 

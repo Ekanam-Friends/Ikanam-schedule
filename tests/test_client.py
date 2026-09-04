@@ -77,10 +77,24 @@ async def test_wrong_password_is_not_retried():
         return httpx.Response(401, json={"message": "Неверный логин или пароль"})
 
     async with client_with(handler) as client:
-        with pytest.raises(AuthError):
+        with pytest.raises(AuthError, match="Неверный логин"):
             await client.login("a", "wrong")
 
     assert calls == 1
+
+
+async def test_auth_error_text_comes_from_nested_cabinet_json():
+    """Живой кабинет кладёт причину во второй слой: `data.message`."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={"message": "Unauthorized", "data": {"message": "Неверный логин или пароль."}},
+        )
+
+    async with client_with(handler) as client:
+        with pytest.raises(AuthError, match="Неверный логин или пароль"):
+            await client.login("a", "b")
 
 
 async def test_login_without_tokens_in_body_is_auth_error():

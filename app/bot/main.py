@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
@@ -26,6 +26,7 @@ from app.bot.deps import AppContext, DependenciesMiddleware
 from app.bot.handlers import account as account_handlers
 from app.bot.handlers import schedule as schedule_handlers
 from app.bot.retry import RetryOnNetworkError
+from app.bot.storage import SQLAlchemyStorage
 from app.bot.texts import build_start_message
 from app.core.config import get_settings
 from app.core.crypto import CredentialsCipher
@@ -68,6 +69,20 @@ async def on_not_ready(message: Message) -> None:
     await message.answer(NOT_READY)
 
 
+@router.message(F.text)
+async def on_unknown_text(message: Message) -> None:
+    """Текст вне диалога. Молчать нельзя.
+
+    Если человек прислал это в ответ на вопрос бота, который тот уже забыл,
+    — например, пароль после перезапуска, — молчание оставит пароль висеть в
+    чате без объяснений. Отвечаем всегда и говорим, что делать.
+    """
+    await message.answer(
+        "Не понял. Если вы вводили логин или пароль — начните заново: /login. "
+        "Список команд: /start"
+    )
+
+
 async def register_commands(bot: Bot) -> None:
     await bot.set_my_commands(
         [BotCommand(command=c.name, description=c.menu_hint) for c in COMMANDS]
@@ -97,6 +112,9 @@ async def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # httpx пишет каждый запрос к кабинету на INFO — это лишний след о том,
+    # кто и когда ходил в кабинет. Ошибки он и так поднимает на WARNING.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     settings = get_settings()
 
     session = AiohttpSession(proxy=settings.telegram_proxy) if settings.telegram_proxy else None
@@ -116,7 +134,9 @@ async def main() -> None:
         session_factory=make_session_factory(engine),
     )
 
-    dispatcher = Dispatcher()
+    # Состояние диалогов — в базе: перезапуск бота посреди ввода пароля не
+    # должен превращаться в проигнорированное сообщение с паролем в чате.
+    dispatcher = Dispatcher(storage=SQLAlchemyStorage(context.session_factory))
     dispatcher.update.middleware(DependenciesMiddleware(context))
     # Порядок важен: диалог входа должен перехватывать текст раньше, чем
     # общие обработчики решат, что это неизвестная команда.

@@ -218,7 +218,7 @@ class RanepaClient:
         url: str,
         *,
         authorized: bool = False,
-        attempts: int = 3,
+        attempts: int = 4,
         **kwargs: Any,
     ) -> Any:
         headers: dict[str, str] = {}
@@ -244,10 +244,12 @@ class RanepaClient:
                     # они наследуются от других классов и уходят наверх сразу.
                     last_error = exc
 
-            # Пауза растёт: 1, 2, 4 секунды. Долбить кабинет чаще смысла нет —
-            # он и так отвечает медленно именно тогда, когда ему тяжело.
+            # Пауза растёт: 2, 4, 8 секунд. Кабинет «моргает» короткими 503
+            # (наблюдалось вживую: три быстрых повтора за пять секунд пришлись
+            # на один и тот же сбой), а долбить его чаще смысла нет — он и так
+            # отвечает медленно именно тогда, когда ему тяжело.
             if attempt < attempts - 1:
-                await asyncio.sleep(2**attempt)
+                await asyncio.sleep(2 ** (attempt + 1))
 
         raise last_error or TemporaryError("Запрос не удался")
 
@@ -257,7 +259,9 @@ class RanepaClient:
             # 403 без JSON — обычно от WAF, и лечится это по-разному.
             if _looks_like_waf(response):
                 raise BlockedError("Запрос отклонён защитой сайта")
-            raise AuthError("Кабинет не принял учётные данные или токен")
+            # Кабинет объясняет отказ по-русски внутри JSON («Неверный логин
+            # или пароль.») — эту фразу и показываем, она точнее нашей.
+            raise AuthError(_cabinet_message(response) or "Кабинет не принял учётные данные")
 
         if response.status_code >= 500:
             raise TemporaryError(f"Кабинет ответил {response.status_code}")
@@ -269,6 +273,26 @@ class RanepaClient:
             return response.json()
         except ValueError as exc:
             raise TemporaryError(f"Кабинет вернул не JSON: {exc}") from exc
+
+
+def _cabinet_message(response: httpx.Response) -> str | None:
+    """Человекочитаемая причина отказа из JSON кабинета, если она там есть.
+
+    Ответ вложенный: `{"message": "Unauthorized", "data": {"message": "Неверный
+    логин или пароль."}}` — полезная фраза во втором слое.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    inner = payload.get("data")
+    if isinstance(inner, dict) and isinstance(inner.get("message"), str):
+        return inner["message"].strip() or None
+    if isinstance(payload.get("message"), str):
+        return payload["message"].strip() or None
+    return None
 
 
 def _looks_like_waf(response: httpx.Response) -> bool:
