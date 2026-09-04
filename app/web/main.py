@@ -18,12 +18,19 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 
 from app.calendar.ics import build_calendar
+from app.core.config import get_settings
+from app.core.crypto import CredentialsCipher
+from app.db.migrate import upgrade_to_head
+from app.db.repo import UserRepository
+from app.db.session import make_engine, make_session_factory, session_scope
 from app.ranepa.models import DaySchedule, Lesson, LessonFormat, Schedule
 
 app = FastAPI(
@@ -49,10 +56,35 @@ async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def configure_database(application: FastAPI, database_url: str, credentials_key: str) -> None:
+    """Подключить базу к приложению.
+
+    Вызывается из lifespan с настройками из окружения, а в тестах — напрямую с
+    временной SQLite: так тесты не зависят от `.env` разработчика.
+    """
+    application.state.session_factory = make_session_factory(make_engine(database_url))
+    application.state.cipher = CredentialsCipher(credentials_key)
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    await upgrade_to_head(settings.database_url)
+    configure_database(
+        application, settings.database_url, settings.credentials_key.get_secret_value()
+    )
+    yield
+
+
+app.router.lifespan_context = lifespan
+app.state.session_factory = None
+app.state.cipher = None
+
+
 @app.get("/feed/{token}.ics")
 async def feed(token: str, request: Request) -> Response:
     """Отдать календарь по секретной ссылке."""
-    schedule = _load_schedule(token)
+    schedule, reminder = await _load_schedule(token)
     if schedule is None:
         # Одинаковый ответ и на несуществующий, и на отозванный токен: разница в
         # ответах позволила бы перебором отличать живые ссылки от мёртвых.
@@ -62,6 +94,7 @@ async def feed(token: str, request: Request) -> Response:
         schedule,
         calendar_name="Расписание РАНХиГС",
         for_subscription=True,
+        reminder_minutes=reminder,
     )
 
     etag = '"%s"' % hashlib.sha1(body).hexdigest()
@@ -81,15 +114,29 @@ async def feed(token: str, request: Request) -> Response:
     )
 
 
-def _load_schedule(token: str) -> Schedule | None:
-    """Найти расписание по токену подписки.
+async def _load_schedule(token: str) -> tuple[Schedule | None, int | None]:
+    """Расписание по токену подписки: последний удачный снапшот из базы.
 
-    Заглушка на время разработки: настоящая реализация возьмёт последний удачный
-    снапшот пользователя из базы.
+    Пользователь без снапшотов получает пустой календарь, а не 404: подписка
+    у него есть, просто пар пока нет. 404 — только для чужих и отозванных
+    токенов. Демо-токен остаётся для проверки клиентов без базы.
     """
     if token == DEMO_TOKEN:
-        return _demo_schedule()
-    return None
+        return _demo_schedule(), None
+
+    factory = app.state.session_factory
+    if factory is None:
+        return None, None
+
+    async with session_scope(factory) as session:
+        repo = UserRepository(session, app.state.cipher)
+        user = await repo.get_by_feed_token(token)
+        if user is None:
+            return None, None
+        # Прошлые дни календарю не нужны, но неделя назад полезна: человек
+        # видит, что было, и клиент не удаляет события задним числом.
+        since = date.today() - timedelta(days=7)
+        return await repo.load_schedule(user, since=since), user.reminder_minutes
 
 
 def _demo_schedule() -> Schedule:

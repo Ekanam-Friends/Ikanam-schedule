@@ -50,11 +50,17 @@ class Lesson:
 
     @property
     def location(self) -> str:
-        """Место занятия одной строкой — для поля LOCATION в календаре."""
+        """Место занятия одной строкой — для поля LOCATION в календаре.
+
+        Не сырая строка кабинета, а человеческий вид: «ауд. 3406, блок 3G,
+        корпус 1, Вернадского 84». Коды оборудования и вместимость студенту
+        не нужны, а в узкой строке календаря они вытесняют номер аудитории.
+        """
         if self.lesson_format is LessonFormat.DISTANT:
             return "Дистанционно (СДО)"
-        parts = [p for p in (self.room, self.building) if p]
-        return ", ".join(parts)
+        from app.ranepa.rooms import pretty_location
+
+        return pretty_location(self.room, self.building)
 
     @property
     def uid(self) -> str:

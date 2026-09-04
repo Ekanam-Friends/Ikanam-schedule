@@ -11,6 +11,7 @@ from datetime import date
 from html import escape
 
 from app.ranepa.models import DaySchedule, Lesson, LessonFormat, Schedule
+from app.ranepa.rooms import pretty_building, pretty_room
 
 WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 MONTHS_GENITIVE = (
@@ -36,9 +37,9 @@ def format_lesson(lesson: Lesson) -> str:
     if lesson.lesson_format is LessonFormat.DISTANT:
         details.append("дистанционно")
     elif lesson.room:
-        details.append(escape(lesson.room))
+        details.append(escape(pretty_room(lesson.room) or lesson.room))
         if lesson.building:
-            details.append(escape(short_building(lesson.building)))
+            details.append(escape(pretty_building(lesson.building) or lesson.building))
     else:
         details.append("аудитория уточняется")
     lines.append("    " + ", ".join(details))
@@ -78,13 +79,5 @@ def format_week(schedule: Schedule, *, since: date, days: int = 7) -> str:
 
 
 def short_building(building: str) -> str:
-    """«Вернадского, 82 - корпус 5» → «корпус 5, Вернадского 82».
-
-    Корпус важнее улицы: улица у большинства пар одна и та же, а корпус —
-    то, из-за чего опаздывают.
-    """
-    if " - " not in building:
-        return building
-    street, _, corpus = building.partition(" - ")
-    street = street.replace(",", "")
-    return f"{corpus.strip()}, {street.strip()}"
+    """Совместимое имя; логика живёт в `app.ranepa.rooms`."""
+    return pretty_building(building) or building

@@ -38,7 +38,8 @@ def test_lesson_shows_time_room_building_and_teacher():
 
     assert "<b>09:00–10:20</b>" in text
     assert "Математический анализ" in text
-    assert "5 - 406 (24) П+ПК" in text
+    assert "ауд. 406" in text
+    assert "П+ПК" not in text and "(24)" not in text
     assert "корпус 5, Вернадского 82" in text
     assert "Козко Артем Иванович" in text
 

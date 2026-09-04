@@ -86,8 +86,7 @@ def test_location_joins_room_and_building():
     raw = build_calendar(make_schedule(make_lesson()))
     location = str(events(raw)[0]["LOCATION"])
 
-    assert "5 - 406 (24) П+ПК" in location
-    assert "Вернадского, 82 - корпус 5" in location
+    assert location == "ауд. 406, корпус 5, Вернадского 82"
 
 
 def test_sequence_comes_from_storage():
@@ -152,7 +151,7 @@ def test_description_keeps_full_name_and_place():
     description = str(events(raw)[0]["DESCRIPTION"])
 
     assert "Козко Артем Иванович" in description
-    assert "5 - 406 (24) П+ПК" in description
+    assert "ауд. 406" in description
 
 
 def test_lesson_without_teacher_keeps_clean_title():

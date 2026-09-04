@@ -24,6 +24,7 @@ from aiogram.types import BotCommand, Message
 from app.bot.commands import COMMANDS
 from app.bot.deps import AppContext, DependenciesMiddleware
 from app.bot.handlers import account as account_handlers
+from app.bot.handlers import calendar as calendar_handlers
 from app.bot.handlers import schedule as schedule_handlers
 from app.bot.retry import RetryOnNetworkError
 from app.bot.storage import SQLAlchemyStorage
@@ -38,11 +39,11 @@ log = logging.getLogger(__name__)
 
 router = Router(name="core")
 
-IMPLEMENTED = {"start", "login", "logout", "today", "tomorrow", "week", "status"}
+IMPLEMENTED = {"start", "login", "logout", "today", "tomorrow", "week", "status", "calendar"}
 
 NOT_READY = (
     "Эта команда ещё в разработке.\n"
-    "Что уже работает: /login, /today, /tomorrow, /week, /status, /logout"
+    "Что уже работает: /login, /today, /tomorrow, /week, /calendar, /status, /logout"
 )
 
 
@@ -145,6 +146,7 @@ async def main() -> None:
     # общие обработчики решат, что это неизвестная команда.
     dispatcher.include_router(account_handlers.router)
     dispatcher.include_router(schedule_handlers.router)
+    dispatcher.include_router(calendar_handlers.router)
     dispatcher.include_router(router)
 
     try:
