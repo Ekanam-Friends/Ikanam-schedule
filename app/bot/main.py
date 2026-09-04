@@ -25,6 +25,7 @@ from app.bot.commands import COMMANDS
 from app.bot.deps import AppContext, DependenciesMiddleware
 from app.bot.handlers import account as account_handlers
 from app.bot.handlers import schedule as schedule_handlers
+from app.bot.retry import RetryOnNetworkError
 from app.bot.texts import build_start_message
 from app.core.config import get_settings
 from app.core.crypto import CredentialsCipher
@@ -104,6 +105,9 @@ async def main() -> None:
         session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    # Повторы на каждый исходящий вызов: прокси до Telegram рвёт часть
+    # соединений, и без этого ответы пользователям просто теряются.
+    bot.session.middleware(RetryOnNetworkError())
     engine = make_engine(settings.database_url)
     await create_schema(engine)
     context = AppContext(
