@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -55,6 +56,17 @@ class Settings(BaseSettings):
     наша граница доверия: если месяц подряд ключ не удаётся обновить, дальше
     ходить с ним в чужой кабинет бессмысленно — просим человека войти заново."""
 
+    ranepa_challenge_solver: Literal["none", "playwright"] = Field(
+        default="none", alias="RANEPA_CHALLENGE_SOLVER"
+    )
+    """Как проходить JS-проверку антибота кабинета.
+
+    С адресов дата-центров кабинет отдаёт вместо API страницу, которая
+    считает хеш в браузере и ставит cookie. `playwright` — пройти её настоящим
+    headless Chromium (входит в docker-образ) и ходить в API с полученными
+    cookie. `none` — не проходить: годится там, где проверки нет, например с
+    домашнего адреса; иначе вход будет падать с понятной ошибкой."""
+
     sync_concurrency: int = Field(default=4, ge=1, le=32, alias="SYNC_CONCURRENCY")
     """Сколько аккаунтов синхронизируются одновременно. Держим низким осознанно:
     несколько сотен логинов с одного адреса — заметная нагрузка на чужой сервер,
@@ -75,6 +87,15 @@ class Settings(BaseSettings):
         """
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("ranepa_challenge_solver", mode="before")
+    @classmethod
+    def _solver_name(cls, value: object) -> object:
+        """Пустое значение — «не задано», регистр не важен."""
+        if isinstance(value, str):
+            value = value.strip().lower()
+            return value or "none"
         return value
 
     def feed_url(self, token: str) -> str:

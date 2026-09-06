@@ -159,6 +159,75 @@ async def test_js_challenge_is_not_mistaken_for_bad_credentials():
         assert not issubclass(ChallengeError, AuthError)
 
 
+# --- Решатель проверки: cookie из браузера подставляются в httpx ---
+
+
+class FakeSolver:
+    """Решатель без браузера: отдаёт заданные cookie и запоминает, как его звали."""
+
+    def __init__(self, *cookie_sets: dict[str, str]) -> None:
+        self._sets = list(cookie_sets)
+        self.calls: list[bool] = []
+
+    async def cookies(self, *, refresh: bool = False) -> dict[str, str]:
+        self.calls.append(refresh)
+        return dict(self._sets.pop(0) if len(self._sets) > 1 else self._sets[0])
+
+
+def challenge_unless_cookie(payload, *, accept: str = "__jhash_=ok"):
+    """Кабинет: без правильной cookie — страница проверки, с ней — JSON."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if accept not in request.headers.get("cookie", ""):
+            return httpx.Response(200, text=CHALLENGE_PAGE, headers={"content-type": "text/html"})
+        return httpx.Response(200, json=payload)
+
+    return handler
+
+
+async def test_solver_cookies_are_applied_before_first_request():
+    solver = FakeSolver({"__jhash_": "ok", "__jua_": "ua"})
+    async with client_with(challenge_unless_cookie(LOGIN_OK), challenge_solver=solver) as client:
+        tokens = await client.login("a", "b")
+
+    assert tokens.access_token == "access-1"
+    assert solver.calls == [False]
+
+
+async def test_expired_challenge_cookies_are_renewed_and_request_repeated():
+    """Cookie проверки живут около получаса: посреди ночной синхронизации кабинет
+    снова покажет страницу. Клиент проходит проверку заново и повторяет запрос —
+    один раз и без паузы, это не сбой кабинета."""
+    solver = FakeSolver({"__jhash_": "stale"}, {"__jhash_": "ok"})
+    async with client_with(challenge_unless_cookie(LOGIN_OK), challenge_solver=solver) as client:
+        tokens = await client.login("a", "b")
+
+    assert tokens.access_token == "access-1"
+    assert solver.calls == [False, True]
+
+
+async def test_challenge_persisting_after_renewal_is_reported_not_looped():
+    solver = FakeSolver({"__jhash_": "stale"})
+    async with client_with(challenge_unless_cookie(LOGIN_OK), challenge_solver=solver) as client:
+        with pytest.raises(ChallengeError):
+            await client.login("a", "b")
+
+    # Одна попытка перерешать — и стоп: иначе браузер поднимался бы в цикле.
+    assert solver.calls == [False, True]
+
+
+async def test_solver_failure_is_a_challenge_error_not_a_crash():
+    class BrokenSolver:
+        async def cookies(self, *, refresh: bool = False) -> dict[str, str]:
+            raise RuntimeError("chromium не стартовал")
+
+    async with client_with(
+        challenge_unless_cookie(LOGIN_OK), challenge_solver=BrokenSolver()
+    ) as client:
+        with pytest.raises(ChallengeError, match="браузерную проверку"):
+            await client.login("a", "b")
+
+
 async def test_schedule_repeats_filters_and_dates():
     """Даты перечисляются по одной: диапазона кабинет не понимает."""
     seen: dict = {}

@@ -20,11 +20,16 @@ HTML здесь не разбирается вовсе. Формат запро�
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+
+from app.ranepa.challenge import CookieSource
+
+log = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://my.ranepa.ru/lk/n-api/"
 
@@ -126,7 +131,14 @@ class RanepaClient:
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = 60.0,
         tokens: Tokens | None = None,
+        challenge_solver: CookieSource | None = None,
     ) -> None:
+        """
+        Args:
+            challenge_solver: откуда брать cookie JS-проверки антибота. Без него
+                проверка поднимается как `ChallengeError`; с ним клиент ставит
+                cookie перед первым запросом и перерешивает, когда они истекают.
+        """
         # Таймаут заметно больше обычного: кабинет регулярно отвечает на
         # `schedule` десятками секунд, и обрывать такой запрос — значит просто
         # заставить сервер сделать ту же работу ещё раз.
@@ -143,6 +155,8 @@ class RanepaClient:
             trust_env=False,
         )
         self.tokens = tokens
+        self._solver = challenge_solver
+        self._challenge_cookies_applied = False
 
     async def __aenter__(self) -> RanepaClient:
         return self
@@ -260,7 +274,11 @@ class RanepaClient:
                 raise AuthError("Нет токена доступа")
             headers["Authorization"] = f"Bearer {self.tokens.access_token}"
 
+        if self._solver is not None and not self._challenge_cookies_applied:
+            await self._apply_challenge_cookies()
+
         last_error: Exception | None = None
+        challenge_retried = False
         for attempt in range(attempts):
             try:
                 response = await self._client.request(method, url, headers=headers, **kwargs)
@@ -271,6 +289,16 @@ class RanepaClient:
             else:
                 try:
                     return self._handle(response)
+                except ChallengeError:
+                    if self._solver is None or challenge_retried:
+                        raise
+                    # Cookie проверки живут около получаса и истекают посреди
+                    # длинной синхронизации. Проходим проверку заново и повторяем
+                    # сразу: ждать тут нечего, кабинет жив и отвечает.
+                    challenge_retried = True
+                    log.info("Кабинет снова показал проверку — обновляем cookie")
+                    await self._apply_challenge_cookies(refresh=True)
+                    continue
                 except TemporaryError as exc:
                     # Пятисотки кабинета — такой же повод повторить, как обрыв
                     # связи. Ошибки авторизации и блокировки сюда не попадают:
@@ -286,11 +314,27 @@ class RanepaClient:
 
         raise last_error or TemporaryError("Запрос не удался")
 
+    async def _apply_challenge_cookies(self, *, refresh: bool = False) -> None:
+        assert self._solver is not None
+        try:
+            cookies = await self._solver.cookies(refresh=refresh)
+        except Exception as exc:  # noqa: BLE001 — нет браузера, таймаут, сеть: причина любая
+            raise ChallengeError(f"Не удалось пройти браузерную проверку кабинета: {exc}") from exc
+        host = self._client.base_url.host
+        for name, value in cookies.items():
+            self._client.cookies.set(name, value, domain=host)
+        self._challenge_cookies_applied = True
+
     def _handle(self, response: httpx.Response) -> Any:
         if _looks_like_challenge(response):
             # HTML с антибот-скриптом приходит с кодом 200 — если не поймать его
             # здесь, попытка разобрать JSON ниже даст невнятную TemporaryError,
             # а на входе — ложное «неверный пароль».
+            if self._solver is None:
+                log.warning(
+                    "Кабинет требует браузерную проверку с этого адреса. Пройти её "
+                    "умеет RANEPA_CHALLENGE_SOLVER=playwright, см. docs/deploy-yandex.md"
+                )
             raise ChallengeError("Кабинет требует браузерную проверку с этого адреса")
         if response.status_code in (401, 403):
             # Оба кода приходят от разных сторон: 401 — от самого кабинета,

@@ -58,7 +58,9 @@ async def env():
     await create_schema(engine)
     factory = make_session_factory(engine)
     async with factory() as session:
-        repo = UserRepository(session, CredentialsCipher(base64.urlsafe_b64encode(os.urandom(32)).decode()))
+        repo = UserRepository(
+            session, CredentialsCipher(base64.urlsafe_b64encode(os.urandom(32)).decode())
+        )
         cabinet = Cabinet()
         sync = ScheduleSyncService(repo, client_factory=cabinet.factory)
         account = AccountService(repo, sync, client_factory=cabinet.factory)
@@ -139,7 +141,9 @@ async def test_cancelled_then_restored(env):
     stored = await repo.load_schedule(user, since=date(2026, 9, 23), until=date(2026, 9, 23))
     assert not any(l.cancelled for l in stored.lessons)
     # Отмена и восстановление — две правки одного события.
-    uid = next(l for l in stored.lessons if l.start.strftime("%H:%M") == removed["start_date"][11:16]).uid
+    uid = next(
+        l for l in stored.lessons if l.start.strftime("%H:%M") == removed["start_date"][11:16]
+    ).uid
     assert (await repo.sequences_for(user))[uid] == 2
 
 

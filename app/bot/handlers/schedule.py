@@ -52,8 +52,10 @@ async def _send_day(message: Message, repo: UserRepository, day: date, *, title:
         return
     schedule = await repo.load_schedule(user, since=day, until=day)
     found = schedule.day_for(day)
-    text = format_day(found, title=f"{title}, {_date_label(day)}") if found else (
-        format_missing_day(day, title=f"{title}, {_date_label(day)}")
+    text = (
+        format_day(found, title=f"{title}, {_date_label(day)}")
+        if found
+        else (format_missing_day(day, title=f"{title}, {_date_label(day)}"))
     )
     await message.answer(text)
 

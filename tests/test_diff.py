@@ -118,10 +118,12 @@ def test_previously_cancelled_and_still_absent_stays_cancelled_silently():
 
 def test_days_absent_from_new_fetch_are_not_compared():
     """Про день, которого нет в выгрузке, мы ничего не знаем — молчим."""
-    old = Schedule(days=[
-        DaySchedule(day=DAY, lessons=[lesson()]),
-        DaySchedule(day=date(2026, 9, 8), lessons=[lesson(subject="История")]),
-    ])
+    old = Schedule(
+        days=[
+            DaySchedule(day=DAY, lessons=[lesson()]),
+            DaySchedule(day=date(2026, 9, 8), lessons=[lesson(subject="История")]),
+        ]
+    )
     result = diff_schedules(old, schedule(lesson()))
 
     assert result.is_empty
@@ -136,6 +138,8 @@ def test_empty_new_day_cancels_everything_that_was_there():
 
 
 def test_merged_lessons_are_sorted_by_time():
-    result = diff_schedules(schedule(lesson(hour=9), lesson("История", 13)), schedule(lesson("История", 13)))
+    result = diff_schedules(
+        schedule(lesson(hour=9), lesson("История", 13)), schedule(lesson("История", 13))
+    )
 
     assert [l.start.hour for l in result.merged.lessons] == [9, 13]

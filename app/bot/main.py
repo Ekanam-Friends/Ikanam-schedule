@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from functools import partial
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
@@ -32,15 +33,18 @@ from app.bot.retry import RetryOnNetworkError
 from app.bot.scheduler import SchedulerContext, start_background_tasks
 from app.bot.storage import SQLAlchemyStorage
 from app.bot.texts import build_start_message
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.crypto import CredentialsCipher
 from app.db.migrate import upgrade_to_head
 from app.db.repo import UserRepository
 from app.db.session import make_engine, make_session_factory
+from app.ranepa.challenge import ChallengeSolver
+from app.ranepa.client import BROWSER_HEADERS, RanepaClient
 
 log = logging.getLogger(__name__)
 
 router = Router(name="core")
+
 
 @router.message(CommandStart())
 async def on_start(message: Message, repo: UserRepository) -> None:
@@ -65,8 +69,7 @@ async def on_unknown_text(message: Message) -> None:
     чате без объяснений. Отвечаем всегда и говорим, что делать.
     """
     await message.answer(
-        "Не понял. Если вы вводили логин или пароль — начните заново: /login. "
-        "Список команд: /start"
+        "Не понял. Если вы вводили логин или пароль — начните заново: /login. Список команд: /start"
     )
 
 
@@ -94,6 +97,23 @@ async def with_retries(action, *, what: str, attempts: int = 6):
             await asyncio.sleep(delay)
 
 
+def build_client_factory(settings: Settings):
+    """Фабрика клиентов кабинета — при необходимости с общим решателем проверки.
+
+    Решатель один на процесс намеренно: проверка привязана к адресу, а не к
+    пользователю, и её результат делят все синхронизации. Отдельный Chromium
+    на каждого пользователя — это минуты ожидания и гигабайты памяти зря.
+    """
+    if settings.ranepa_challenge_solver != "playwright":
+        return RanepaClient
+    solver = ChallengeSolver(
+        base_url=settings.ranepa_base_url,
+        user_agent=BROWSER_HEADERS["User-Agent"],
+    )
+    log.info("JS-проверку кабинета проходим через Chromium (Playwright)")
+    return partial(RanepaClient, challenge_solver=solver)
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -117,10 +137,12 @@ async def main() -> None:
     # ручных команд, ни пересоздания базы с потерей подключённых кабинетов.
     await upgrade_to_head(settings.database_url)
     engine = make_engine(settings.database_url)
+    client_factory = build_client_factory(settings)
     context = AppContext(
         settings=settings,
         cipher=CredentialsCipher(settings.credentials_key.get_secret_value()),
         session_factory=make_session_factory(engine),
+        client_factory=client_factory,
     )
 
     # Состояние диалогов — в базе: перезапуск бота посреди ввода пароля не
@@ -144,6 +166,7 @@ async def main() -> None:
             settings=settings,
             cipher=context.cipher,
             session_factory=context.session_factory,
+            client_factory=client_factory,
         )
     )
 

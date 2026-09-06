@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
@@ -28,6 +29,7 @@ from app.core.crypto import CredentialsCipher
 from app.db.models import User
 from app.db.repo import UserRepository
 from app.db.session import session_scope
+from app.ranepa.client import RanepaClient
 from app.services.notify import format_changes
 from app.services.sync import ReauthRequired, ScheduleSyncService, SyncError
 
@@ -101,6 +103,8 @@ class SchedulerContext:
     settings: Settings
     cipher: CredentialsCipher
     session_factory: async_sessionmaker[AsyncSession]
+    client_factory: Callable[..., RanepaClient] = RanepaClient
+    """Как создавать клиент кабинета; см. `AppContext.client_factory`."""
     digest_sent: dict[int, date] = field(default_factory=dict)
     """Кому сводка уже ушла сегодня — чтобы не повторять в ту же минуту."""
 
@@ -147,7 +151,11 @@ async def sync_everyone(ctx: SchedulerContext) -> NightlyReport:
     await asyncio.gather(*(one(i) for i in ids))
     log.info(
         "Ночь: всего %d, успешно %d, с изменениями %d, нужен вход %d, ошибок %d",
-        report.total, report.synced, report.changed, report.reauth, report.failed,
+        report.total,
+        report.synced,
+        report.changed,
+        report.reauth,
+        report.failed,
     )
     return report
 
@@ -170,7 +178,7 @@ async def sync_one(ctx: SchedulerContext, telegram_id: int, report: NightlyRepor
             report.reauth += 1
             await _send(ctx.bot, telegram_id, REAUTH_TEXT)
             return
-        service = ScheduleSyncService(repo)
+        service = ScheduleSyncService(repo, client_factory=ctx.client_factory)
         try:
             result = await service.sync_user(user)
         except ReauthRequired:

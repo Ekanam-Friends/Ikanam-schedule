@@ -36,7 +36,10 @@ def test_cancellation_is_struck_through():
 
 def test_move_names_both_times():
     change = Change(
-        ChangeKind.MOVED, lesson(hour=12), previous=lesson(hour=9), details=("время: 09:00 → 12:00",)
+        ChangeKind.MOVED,
+        lesson(hour=12),
+        previous=lesson(hour=9),
+        details=("время: 09:00 → 12:00",),
     )
     text = format_changes([change])
 
@@ -63,17 +66,21 @@ def test_added_lesson_shows_human_place():
 
 
 def test_changed_lesson_lists_details():
-    change = Change(ChangeKind.CHANGED, lesson(), previous=lesson(), details=("аудитория: 5 - 406 → 1 - 3406",))
+    change = Change(
+        ChangeKind.CHANGED, lesson(), previous=lesson(), details=("аудитория: 5 - 406 → 1 - 3406",)
+    )
     text = format_changes([change])
 
     assert "09:00 Матанализ — аудитория: 5 - 406 → 1 - 3406" in text
 
 
 def test_changes_are_grouped_by_day_in_order():
-    text = format_changes([
-        Change(ChangeKind.ADDED, lesson(day=9)),
-        Change(ChangeKind.CANCELLED, lesson(day=7, cancelled=True)),
-    ])
+    text = format_changes(
+        [
+            Change(ChangeKind.ADDED, lesson(day=9)),
+            Change(ChangeKind.CANCELLED, lesson(day=7, cancelled=True)),
+        ]
+    )
 
     assert text.index("7 сентября") < text.index("9 сентября")
     assert text.count("<b>Расписание изменилось</b>") == 1
@@ -86,7 +93,10 @@ def test_html_in_subject_is_escaped():
 
 
 def test_huge_change_list_fits_telegram_limit():
-    changes = [Change(ChangeKind.ADDED, lesson(subject=f"Предмет номер {i}", day=(i % 20) + 1)) for i in range(400)]
+    changes = [
+        Change(ChangeKind.ADDED, lesson(subject=f"Предмет номер {i}", day=(i % 20) + 1))
+        for i in range(400)
+    ]
     text = format_changes(changes)
 
     assert len(text) <= TELEGRAM_MESSAGE_LIMIT

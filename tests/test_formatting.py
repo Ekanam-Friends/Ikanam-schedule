@@ -92,7 +92,12 @@ def test_day_uses_custom_title():
 def test_week_collapses_empty_and_missing_days():
     schedule = Schedule(
         days=[
-            DaySchedule(day=date(2026, 9, 7), lessons=[lesson(start=datetime(2026, 9, 7, 9, 0), end=datetime(2026, 9, 7, 10, 20))]),
+            DaySchedule(
+                day=date(2026, 9, 7),
+                lessons=[
+                    lesson(start=datetime(2026, 9, 7, 9, 0), end=datetime(2026, 9, 7, 10, 20))
+                ],
+            ),
             DaySchedule(day=date(2026, 9, 8)),
         ]
     )

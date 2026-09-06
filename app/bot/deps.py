@@ -19,6 +19,7 @@ from app.core.config import Settings
 from app.core.crypto import CredentialsCipher
 from app.db.repo import UserRepository
 from app.db.session import session_scope
+from app.ranepa.client import RanepaClient
 from app.services.account import AccountService
 from app.services.sync import ScheduleSyncService
 
@@ -28,6 +29,9 @@ class AppContext:
     settings: Settings
     cipher: CredentialsCipher
     session_factory: async_sessionmaker[AsyncSession]
+    client_factory: Callable[..., RanepaClient] = RanepaClient
+    """Как создавать клиент кабинета. В продакшне сюда приходит фабрика с общим
+    решателем JS-проверки; в тестах и без проверки — сам класс клиента."""
 
 
 class DependenciesMiddleware(BaseMiddleware):
@@ -42,9 +46,10 @@ class DependenciesMiddleware(BaseMiddleware):
     ) -> Any:
         async with session_scope(self._context.session_factory) as session:
             repo = UserRepository(session, self._context.cipher)
-            sync = ScheduleSyncService(repo)
+            factory = self._context.client_factory
+            sync = ScheduleSyncService(repo, client_factory=factory)
             data["settings"] = self._context.settings
             data["repo"] = repo
             data["sync"] = sync
-            data["account"] = AccountService(repo, sync)
+            data["account"] = AccountService(repo, sync, client_factory=factory)
             return await handler(event, data)

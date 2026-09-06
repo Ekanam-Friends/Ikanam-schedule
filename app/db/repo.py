@@ -186,7 +186,6 @@ class UserRepository:
         fetched_at = max((s.fetched_at for s in snapshots), default=None)
         return Schedule(days=days, fetched_at=fetched_at)
 
-
     # --- Ревизии занятий для календаря ---
 
     async def sequences_for(self, user: User) -> dict[str, int]:

@@ -22,6 +22,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.8", "respx>=0.21"]
+# Headless Chromium для JS-проверки антибота кабинета (RANEPA_CHALLENGE_SOLVER=playwright).
+# После установки нужен сам браузер: `playwright install --with-deps chromium`.
+browser = ["playwright>=1.47"]
 
 [tool.setuptools.packages.find]
 # Пакет — только `app`. Без этого setuptools находит рядом `migrations` и

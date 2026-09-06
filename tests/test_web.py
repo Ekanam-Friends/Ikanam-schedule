@@ -93,7 +93,9 @@ def db_client(tmp_path):
         configure_database(app, url, key)
         async with session_scope(app.state.session_factory) as session:
             repo = UserRepository(session, app.state.cipher)
-            user = await repo.connect(7, refresh_token="r", access_valid_until=None, profile=PROFILE)
+            user = await repo.connect(
+                7, refresh_token="r", access_valid_until=None, profile=PROFILE
+            )
             today = date.today()
             await repo.save_schedule(
                 user,
@@ -104,8 +106,12 @@ def db_client(tmp_path):
                             lessons=[
                                 Lesson(
                                     subject="Философия",
-                                    start=datetime.combine(today, datetime.min.time()).replace(hour=9),
-                                    end=datetime.combine(today, datetime.min.time()).replace(hour=10, minute=20),
+                                    start=datetime.combine(today, datetime.min.time()).replace(
+                                        hour=9
+                                    ),
+                                    end=datetime.combine(today, datetime.min.time()).replace(
+                                        hour=10, minute=20
+                                    ),
                                     teacher="Иванов Иван Иванович",
                                     room="1 - 3406 (26) П+ПК Блок 3G",
                                     building="Вернадского, 84 - корпус 1",
@@ -116,7 +122,9 @@ def db_client(tmp_path):
                     fetched_at=datetime.now(timezone.utc),
                 ),
             )
-            empty = await repo.connect(8, refresh_token="r", access_valid_until=None, profile=PROFILE)
+            empty = await repo.connect(
+                8, refresh_token="r", access_valid_until=None, profile=PROFILE
+            )
             return user.feed_token, empty.feed_token
 
     import asyncio

@@ -37,7 +37,7 @@ class CredentialsCipher:
         except (ValueError, TypeError) as exc:
             raise CredentialsCipherError(
                 "CREDENTIALS_KEY должен быть 32 байтами в base64url. "
-                "Сгенерировать: python -c \"import base64,os; "
+                'Сгенерировать: python -c "import base64,os; '
                 'print(base64.urlsafe_b64encode(os.urandom(32)).decode())"'
             ) from exc
 

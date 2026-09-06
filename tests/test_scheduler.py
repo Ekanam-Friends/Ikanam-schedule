@@ -78,7 +78,13 @@ def test_jitter_spreads_start_times():
 
 
 def user(**overrides) -> User:
-    fields = dict(telegram_id=1, feed_token="t", morning_digest_at="08:00", refresh_token_encrypted="x", is_active=True)
+    fields = dict(
+        telegram_id=1,
+        feed_token="t",
+        morning_digest_at="08:00",
+        refresh_token_encrypted="x",
+        is_active=True,
+    )
     fields.update(overrides)
     return User(**fields)
 
@@ -109,7 +115,9 @@ def test_digest_time_is_moscow_not_utc():
 # --- send_due_digests с базой ---
 
 
-PROFILE = StudentProfile(student_uid="s", org_uid="o", group_name="ЭИ-25", groups=(EduGroup("g", "ЭИ-25"),))
+PROFILE = StudentProfile(
+    student_uid="s", org_uid="o", group_name="ЭИ-25", groups=(EduGroup("g", "ЭИ-25"),)
+)
 
 
 @pytest_asyncio.fixture
@@ -126,14 +134,25 @@ async def ctx():
         u.morning_digest_at = "08:00"
         await repo.save_schedule(
             u,
-            Schedule(days=[
-                DaySchedule(day=date(2026, 9, 7), lessons=[Lesson(
-                    subject="Матанализ", start=datetime(2026, 9, 7, 9, 0), end=datetime(2026, 9, 7, 10, 20),
-                    teacher="Козко А. И.", room="5 - 406", building="Вернадского, 82 - корпус 5",
-                    lesson_format=LessonFormat.ONSITE,
-                )]),
-                DaySchedule(day=date(2026, 9, 8)),
-            ]),
+            Schedule(
+                days=[
+                    DaySchedule(
+                        day=date(2026, 9, 7),
+                        lessons=[
+                            Lesson(
+                                subject="Матанализ",
+                                start=datetime(2026, 9, 7, 9, 0),
+                                end=datetime(2026, 9, 7, 10, 20),
+                                teacher="Козко А. И.",
+                                room="5 - 406",
+                                building="Вернадского, 82 - корпус 5",
+                                lesson_format=LessonFormat.ONSITE,
+                            )
+                        ],
+                    ),
+                    DaySchedule(day=date(2026, 9, 8)),
+                ]
+            ),
         )
         await session.commit()
     yield context
@@ -167,7 +186,9 @@ async def test_digest_not_sent_at_other_minutes(ctx):
 
 async def test_owner_is_not_bothered_when_all_is_well():
     bot = FakeBot()
-    context = SchedulerContext(bot=bot, settings=settings(OWNER_CHAT_ID="42"), cipher=None, session_factory=None)
+    context = SchedulerContext(
+        bot=bot, settings=settings(OWNER_CHAT_ID="42"), cipher=None, session_factory=None
+    )
 
     await report_to_owner(context, NightlyReport(total=10, synced=10))
 
@@ -176,9 +197,13 @@ async def test_owner_is_not_bothered_when_all_is_well():
 
 async def test_owner_is_alerted_on_failures_and_total_outage():
     bot = FakeBot()
-    context = SchedulerContext(bot=bot, settings=settings(OWNER_CHAT_ID="42"), cipher=None, session_factory=None)
+    context = SchedulerContext(
+        bot=bot, settings=settings(OWNER_CHAT_ID="42"), cipher=None, session_factory=None
+    )
 
-    await report_to_owner(context, NightlyReport(total=3, failed=3, errors=["1: 503", "2: 503", "3: 503"]))
+    await report_to_owner(
+        context, NightlyReport(total=3, failed=3, errors=["1: 503", "2: 503", "3: 503"])
+    )
 
     assert len(bot.sent) == 1
     chat_id, text = bot.sent[0]

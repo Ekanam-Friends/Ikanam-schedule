@@ -28,6 +28,18 @@ def build(**overrides) -> Settings:
     return Settings(_env_file=None, **{**BASE_ENV, **overrides})  # type: ignore[arg-type]
 
 
+def test_challenge_solver_is_off_by_default_and_tolerates_empty_value():
+    assert build().ranepa_challenge_solver == "none"
+    assert build(RANEPA_CHALLENGE_SOLVER="").ranepa_challenge_solver == "none"
+    assert build(RANEPA_CHALLENGE_SOLVER=" Playwright ").ranepa_challenge_solver == "playwright"
+
+
+def test_unknown_challenge_solver_fails_at_startup():
+    """Опечатка в имени решателя должна ронять старт, а не молча выключать проверку."""
+    with pytest.raises(ValidationError):
+        build(RANEPA_CHALLENGE_SOLVER="selenium")
+
+
 def test_empty_optional_value_is_treated_as_absent():
     """Необязательные переменные в `.env` оставляют пустыми, а не удаляют.
 
