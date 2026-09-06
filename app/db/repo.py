@@ -26,6 +26,11 @@ class UserRepository:
 
     # --- Пользователи ---
 
+    @property
+    def session(self) -> AsyncSession:
+        """Та же сессия — для журнала активности, живущего в одной транзакции."""
+        return self._session
+
     async def get(self, telegram_id: int) -> User | None:
         return await self._session.get(User, telegram_id)
 

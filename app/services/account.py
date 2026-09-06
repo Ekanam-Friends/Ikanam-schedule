@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from app.db.activity import ActivityLog
 from app.db.models import User
 from app.db.repo import UserRepository
 from app.ranepa.client import (
@@ -100,6 +101,8 @@ class AccountService:
             profile=profile,
             fszet=tokens.fszet,
         )
+
+        await ActivityLog(self._repo.session).record("login:ok")
 
         # Первая синхронизация — сразу, чтобы /today заработал в ту же минуту.
         # Её неудача не отменяет подключение: токен уже сохранён, ночью

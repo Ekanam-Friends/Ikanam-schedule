@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.bot.formatting import format_date, format_day
 from app.core.config import Settings
 from app.core.crypto import CredentialsCipher
+from app.db.activity import ActivityLog
 from app.db.models import User
 from app.db.repo import UserRepository
 from app.db.session import session_scope
@@ -179,18 +180,22 @@ async def sync_one(ctx: SchedulerContext, telegram_id: int, report: NightlyRepor
             await _send(ctx.bot, telegram_id, REAUTH_TEXT)
             return
         service = ScheduleSyncService(repo, client_factory=ctx.client_factory)
+        activity = ActivityLog(session)
         try:
             result = await service.sync_user(user)
         except ReauthRequired:
             report.reauth += 1
+            await activity.record("sync:reauth")
             await _send(ctx.bot, telegram_id, REAUTH_TEXT)
             return
         except SyncError as exc:
             report.failed += 1
             report.errors.append(f"{telegram_id}: {exc}"[:200])
+            await activity.record("sync:error")
             return
 
         report.synced += 1
+        await activity.record("sync:ok")
         if result.changes and user.notify_on_change:
             report.changed += 1
             text = format_changes(result.changes)

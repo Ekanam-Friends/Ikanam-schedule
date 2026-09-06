@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.crypto import CredentialsCipher
+from app.db.activity import ActivityLog, command_kind
 from app.db.repo import UserRepository
 from app.db.session import session_scope
 from app.ranepa.client import RanepaClient
@@ -46,6 +47,12 @@ class DependenciesMiddleware(BaseMiddleware):
     ) -> Any:
         async with session_scope(self._context.session_factory) as session:
             repo = UserRepository(session, self._context.cipher)
+            # Счётчик команд для /stats: только вид команды и час, без того,
+            # кто её вызвал. Текст вне команд (логин, пароль) не считается.
+            message = getattr(event, "message", None)
+            kind = command_kind(getattr(message, "text", None))
+            if kind:
+                await ActivityLog(session).record(kind)
             factory = self._context.client_factory
             sync = ScheduleSyncService(repo, client_factory=factory)
             data["settings"] = self._context.settings

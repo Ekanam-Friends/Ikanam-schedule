@@ -29,6 +29,7 @@ from app.bot.handlers import calendar as calendar_handlers
 from app.bot.handlers import donate as donate_handlers
 from app.bot.handlers import schedule as schedule_handlers
 from app.bot.handlers import settings as settings_handlers
+from app.bot.handlers import stats as stats_handlers
 from app.bot.retry import RetryOnNetworkError
 from app.bot.scheduler import SchedulerContext, start_background_tasks
 from app.bot.storage import SQLAlchemyStorage
@@ -156,6 +157,7 @@ async def main() -> None:
     dispatcher.include_router(calendar_handlers.router)
     dispatcher.include_router(settings_handlers.router)
     dispatcher.include_router(donate_handlers.router)
+    dispatcher.include_router(stats_handlers.router)
     dispatcher.include_router(router)
 
     # Ночная синхронизация и утренняя сводка живут в том же процессе: две
