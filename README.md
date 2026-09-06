@@ -100,4 +100,4 @@ python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).dec
 
 ## Лицензия
 
-[MIT](LICENSE) — команда Ekanam Friends.
+[MIT](LICENSE) — команда Ekanam&Friends.
