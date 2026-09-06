@@ -10,6 +10,7 @@ import base64
 import os
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.config import Settings
 
@@ -59,11 +60,11 @@ def test_secrets_are_masked_in_repr():
 
 
 def test_missing_required_setting_fails_fast():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Settings(_env_file=None, BOT_TOKEN="123456:AA-test")  # type: ignore[arg-type]
 
 
 def test_sync_concurrency_is_bounded():
     """Верхняя граница защищает чужой сервер от нашего параллелизма."""
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         build(SYNC_CONCURRENCY="100")

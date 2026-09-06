@@ -77,6 +77,11 @@ COMMANDS: tuple[BotCommandSpec, ...] = (
         explanation="когда бот в последний раз успешно забирал расписание",
     ),
     BotCommandSpec(
+        name="donate",
+        menu_hint="Скинуться на сервер (Telegram Stars)",
+        explanation="поддержать сервер бота через Telegram Stars — по желанию",
+    ),
+    BotCommandSpec(
         name="logout",
         menu_hint="Отключить аккаунт и удалить данные",
         explanation="отключить личный кабинет и удалить всё, что бот о вас хранит",

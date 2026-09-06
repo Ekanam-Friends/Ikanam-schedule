@@ -12,14 +12,13 @@ from datetime import date, datetime, timezone
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
 from app.core.crypto import CredentialsCipher
 from app.db.models import LessonRevision, ScheduleSnapshot, User
 from app.db.repo import UserRepository
 from app.db.session import create_schema, make_engine, make_session_factory
 from app.ranepa.models import DaySchedule, EduGroup, Lesson, LessonFormat, Schedule, StudentProfile
-
-from sqlalchemy import select
 
 
 def make_cipher() -> CredentialsCipher:

@@ -14,7 +14,6 @@ from datetime import date
 from pathlib import Path
 
 import httpx
-import pytest
 import pytest_asyncio
 
 from app.calendar.ics import build_calendar

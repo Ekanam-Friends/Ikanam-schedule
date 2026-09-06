@@ -16,7 +16,7 @@ import asyncio
 import logging
 import random
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
@@ -56,6 +56,22 @@ def seconds_until(hour: int, *, now: datetime, jitter_minutes: int = 20) -> floa
         target += timedelta(days=1)
     target += timedelta(minutes=random.uniform(0, jitter_minutes))
     return (target - now_msk).total_seconds()
+
+
+def token_is_stale(user: User, *, now: datetime, max_age_days: int) -> bool:
+    """Ключ доступа не удавалось обновить дольше допустимого.
+
+    Точкой отсчёта служит последняя удачная синхронизация, а для тех, у кого
+    её ещё не было, — момент подключения. Реальный срок токена задаёт кабинет;
+    это наша граница, после которой ходить с ключом в чужой кабинет — только
+    накапливать отказы.
+    """
+    anchor = user.last_sync_at or user.connected_at
+    if anchor is None:
+        return False
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    return now - anchor > timedelta(days=max_age_days)
 
 
 def digest_is_due(user: User, *, now: datetime, last_sent: date | None) -> bool:
@@ -141,6 +157,18 @@ async def sync_one(ctx: SchedulerContext, telegram_id: int, report: NightlyRepor
         repo = UserRepository(session, ctx.cipher)
         user = await repo.get(telegram_id)
         if user is None or not user.is_connected:
+            return
+        now = datetime.now(timezone.utc)
+        if token_is_stale(user, now=now, max_age_days=ctx.settings.token_max_age_days):
+            # Месяц без удачной синхронизации: ключ считаем мёртвым, снапшоты
+            # оставляем — в календаре пусть будет старое расписание, а не пустота.
+            await repo.mark_failed(
+                user,
+                error=f"Ключ не обновлялся {ctx.settings.token_max_age_days} дней",
+                deactivate=True,
+            )
+            report.reauth += 1
+            await _send(ctx.bot, telegram_id, REAUTH_TEXT)
             return
         service = ScheduleSyncService(repo)
         try:

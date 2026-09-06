@@ -30,6 +30,12 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# В тестах длинные строки с фикстурами и однобуквенные `l` в генераторах
+# читаются лучше, чем их переносы. В текстах бота строка — это фраза целиком.
+"tests/*" = ["E501", "E741"]
+"app/bot/texts.py" = ["E501"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

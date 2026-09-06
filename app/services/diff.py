@@ -129,7 +129,9 @@ def _diff_day(old_day: DaySchedule, new_day: DaySchedule) -> tuple[list[Change],
             continue
         details = tuple(new.differs_from(old))
         if details:
-            changes.append(Change(kind=ChangeKind.CHANGED, lesson=new, previous=old, details=details))
+            changes.append(
+                Change(kind=ChangeKind.CHANGED, lesson=new, previous=old, details=details)
+            )
 
     # Отменённые раньше и всё ещё отсутствующие пары остаются отменёнными в
     # снапшоте, чтобы календарь не «воскресил» их, забыв про отмену.

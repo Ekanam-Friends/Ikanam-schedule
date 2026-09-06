@@ -67,7 +67,7 @@ def test_healthcheck():
 
 import base64  # noqa: E402
 import os  # noqa: E402
-from datetime import date, datetime, timedelta, timezone  # noqa: E402
+from datetime import date, datetime, timezone  # noqa: E402
 
 import pytest  # noqa: E402
 

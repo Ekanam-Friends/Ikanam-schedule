@@ -15,7 +15,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
-from app.bot.texts import LOGIN_ASK_LOGIN, LOGIN_ASK_PASSWORD, LOGIN_CANCELLED, LOGOUT_DONE, LOGOUT_NOTHING
+from app.bot.texts import (
+    LOGIN_ASK_LOGIN,
+    LOGIN_ASK_PASSWORD,
+    LOGIN_CANCELLED,
+    LOGOUT_DONE,
+    LOGOUT_NOTHING,
+)
 from app.db.repo import UserRepository
 from app.services.account import AccountService, ConnectError
 

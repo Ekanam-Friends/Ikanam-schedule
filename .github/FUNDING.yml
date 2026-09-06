@@ -1,0 +1,3 @@
+# Кнопка «Sponsor» на странице репозитория.
+# Донаты принимаются внутри бота через Telegram Stars — командой /donate.
+custom: ["https://t.me/Ikanam_schedule_bot?start=donate"]

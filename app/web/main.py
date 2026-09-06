@@ -98,7 +98,7 @@ async def feed(token: str, request: Request) -> Response:
         sequences=sequences,
     )
 
-    etag = '"%s"' % hashlib.sha1(body).hexdigest()
+    etag = f'"{hashlib.sha1(body).hexdigest()}"'
     if request.headers.get("if-none-match") == etag:
         # Календарь уже видел эту версию — не гоняем её повторно.
         return Response(status_code=304, headers={"ETag": etag})

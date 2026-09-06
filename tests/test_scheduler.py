@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import base64
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
-import pytest
 import pytest_asyncio
 
 from app.bot.scheduler import (
@@ -195,3 +194,37 @@ async def test_no_owner_configured_means_no_alert():
     await report_to_owner(context, NightlyReport(total=1, failed=1))
 
     assert bot.sent == []
+
+
+# --- token_is_stale: граница доверия к ключу доступа ---
+
+from app.bot.scheduler import token_is_stale  # noqa: E402
+
+
+def test_fresh_token_is_not_stale():
+    u = user(last_sync_at=msk(3, 0, day=6))
+
+    assert not token_is_stale(u, now=msk(3, 0, day=7), max_age_days=30)
+
+
+def test_token_without_sync_for_a_month_is_stale():
+    u = user(last_sync_at=datetime(2026, 8, 1, tzinfo=timezone.utc))
+
+    assert token_is_stale(u, now=datetime(2026, 9, 7, tzinfo=timezone.utc), max_age_days=30)
+    assert not token_is_stale(u, now=datetime(2026, 8, 30, tzinfo=timezone.utc), max_age_days=30)
+
+
+def test_never_synced_user_is_measured_from_connection_time():
+    u = user(last_sync_at=None, connected_at=datetime(2026, 7, 1, tzinfo=timezone.utc))
+
+    assert token_is_stale(u, now=datetime(2026, 9, 7, tzinfo=timezone.utc), max_age_days=30)
+
+
+def test_user_without_any_timestamps_is_left_alone():
+    assert not token_is_stale(user(), now=msk(3, 0), max_age_days=30)
+
+
+def test_naive_timestamps_from_sqlite_are_treated_as_utc():
+    u = user(last_sync_at=datetime(2026, 8, 1))
+
+    assert token_is_stale(u, now=datetime(2026, 9, 7, tzinfo=timezone.utc), max_age_days=30)

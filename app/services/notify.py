@@ -40,7 +40,8 @@ def format_changes(changes: list[Change]) -> str | None:
     if len(text) > TELEGRAM_MESSAGE_LIMIT:
         # Такого не бывает при штатных правках, но смена всего семестра —
         # бывает. Лучше обрезать, чем не отправить ничего.
-        text = text[: TELEGRAM_MESSAGE_LIMIT - 40].rsplit("\n", 1)[0] + "\n\n…и ещё изменения, см. /week"
+        head = text[: TELEGRAM_MESSAGE_LIMIT - 40].rsplit("\n", 1)[0]
+        text = head + "\n\n…и ещё изменения, см. /week"
     return text
 
 

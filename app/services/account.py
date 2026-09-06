@@ -60,7 +60,8 @@ class AccountService:
                 raw_groups = await client.get_student_groups()
             except BlockedError as exc:
                 raise CabinetUnavailable(
-                    "Кабинет отклонил запрос. Обычно это временно — попробуйте через несколько минут."
+                    "Кабинет отклонил запрос. Обычно это временно — "
+                    "попробуйте через несколько минут."
                 ) from exc
             except AuthError as exc:
                 raise WrongCredentials("Кабинет не принял логин или пароль.") from exc

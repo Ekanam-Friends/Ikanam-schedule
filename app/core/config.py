@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     # --- Источник ---
     ranepa_base_url: str = Field(default="https://my.ranepa.ru", alias="RANEPA_BASE_URL")
     sync_hour_msk: int = Field(default=3, ge=0, le=23, alias="SYNC_HOUR_MSK")
+    token_max_age_days: int = Field(default=30, ge=1, le=365, alias="TOKEN_MAX_AGE_DAYS")
+    """Сколько дней без удачной синхронизации считать ключ доступа живым.
+
+    Настоящий срок refresh-токена задаёт кабинет, и нам он неизвестен. Это
+    наша граница доверия: если месяц подряд ключ не удаётся обновить, дальше
+    ходить с ним в чужой кабинет бессмысленно — просим человека войти заново."""
+
     sync_concurrency: int = Field(default=4, ge=1, le=32, alias="SYNC_CONCURRENCY")
     """Сколько аккаунтов синхронизируются одновременно. Держим низким осознанно:
     несколько сотен логинов с одного адреса — заметная нагрузка на чужой сервер,

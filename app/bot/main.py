@@ -25,28 +25,22 @@ from app.bot.commands import COMMANDS
 from app.bot.deps import AppContext, DependenciesMiddleware
 from app.bot.handlers import account as account_handlers
 from app.bot.handlers import calendar as calendar_handlers
+from app.bot.handlers import donate as donate_handlers
 from app.bot.handlers import schedule as schedule_handlers
+from app.bot.handlers import settings as settings_handlers
 from app.bot.retry import RetryOnNetworkError
 from app.bot.scheduler import SchedulerContext, start_background_tasks
 from app.bot.storage import SQLAlchemyStorage
 from app.bot.texts import build_start_message
 from app.core.config import get_settings
 from app.core.crypto import CredentialsCipher
-from app.db.repo import UserRepository
 from app.db.migrate import upgrade_to_head
+from app.db.repo import UserRepository
 from app.db.session import make_engine, make_session_factory
 
 log = logging.getLogger(__name__)
 
 router = Router(name="core")
-
-IMPLEMENTED = {"start", "login", "logout", "today", "tomorrow", "week", "status", "calendar"}
-
-NOT_READY = (
-    "Эта команда ещё в разработке.\n"
-    "Что уже работает: /login, /today, /tomorrow, /week, /calendar, /status, /logout"
-)
-
 
 @router.message(CommandStart())
 async def on_start(message: Message, repo: UserRepository) -> None:
@@ -60,16 +54,6 @@ async def on_help(message: Message, repo: UserRepository) -> None:
     # /help не в меню намеренно: это тот же /start, просто люди привыкли
     # набирать именно его, и молчать в ответ — грубо.
     await on_start(message, repo)
-
-
-@router.message(Command(*[c.name for c in COMMANDS if c.name not in IMPLEMENTED]))
-async def on_not_ready(message: Message) -> None:
-    """Честная заглушка для команд, которые ещё не реализованы.
-
-    Лучше прямо сказать «пока не умею», чем притворяться: человек, получивший
-    молчание на команду, решит, что бот сломан, и больше не вернётся.
-    """
-    await message.answer(NOT_READY)
 
 
 @router.message(F.text)
@@ -148,6 +132,8 @@ async def main() -> None:
     dispatcher.include_router(account_handlers.router)
     dispatcher.include_router(schedule_handlers.router)
     dispatcher.include_router(calendar_handlers.router)
+    dispatcher.include_router(settings_handlers.router)
+    dispatcher.include_router(donate_handlers.router)
     dispatcher.include_router(router)
 
     # Ночная синхронизация и утренняя сводка живут в том же процессе: две
@@ -167,7 +153,7 @@ async def main() -> None:
     except TelegramNetworkError:
         log.error("Telegram недоступен. Если так постоянно — задайте TELEGRAM_PROXY в .env")
         await bot.session.close()
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     log.info("Бот @%s запущен, команд зарегистрировано: %d", me.username, len(COMMANDS))
 
