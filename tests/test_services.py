@@ -50,7 +50,9 @@ class FakeCabinet:
         if path.endswith("auth/login"):
             body = request.content.decode("utf-8", "replace")
             if 'name="password"' in body:
-                self.seen_password = body.split('name="password"')[1].split("\r\n\r\n")[1].split("\r\n")[0]
+                self.seen_password = (
+                    body.split('name="password"')[1].split("\r\n\r\n")[1].split("\r\n")[0]
+                )
             return self.login_response
         if path.endswith("auth/refresh"):
             self.seen_refresh_fszet = request.headers.get("fszet")
@@ -156,9 +158,25 @@ async def test_cabinet_down_is_reported_as_temporary(services, cabinet):
 
 async def test_waf_block_is_not_blamed_on_the_user(services, cabinet):
     account, _ = services
-    cabinet.login_response = httpx.Response(403, text="Forbidden", headers={"content-type": "text/plain"})
+    cabinet.login_response = httpx.Response(
+        403, text="Forbidden", headers={"content-type": "text/plain"}
+    )
 
     with pytest.raises(CabinetUnavailable):
+        await account.connect(42, "l", "p")
+
+
+async def test_js_challenge_on_login_is_reported_as_browser_check(services, cabinet):
+    """Антибот-проверка кабинета — это не «неверный пароль» и не «попробуйте
+    позже»: пользователь должен понять, что дело в адресе, а не в его данных."""
+    account, _ = services
+    cabinet.login_response = httpx.Response(
+        200,
+        text="<html><body><script>function get_jhash(b){return 0;}</script></body></html>",
+        headers={"content-type": "text/html", "set-cookie": "__js_p_=1,2,0,0,0; Path=/"},
+    )
+
+    with pytest.raises(CabinetUnavailable, match="браузерную проверку"):
         await account.connect(42, "l", "p")
 
 

@@ -73,6 +73,21 @@ class BlockedError(RanepaError):
     """
 
 
+class ChallengeError(RanepaError):
+    """Кабинет вернул JS-проверку антибота вместо ответа API.
+
+    Вместо JSON приходит HTML-страница со скриптом `get_jhash`: она считает хеш
+    в браузере, ставит cookie `__jhash_` и только потом пускает к API. Так
+    кабинет отсекает неброузерные клиенты — и делает это по адресу источника,
+    а не по учётным данным. С доверенного (например, домашнего) адреса проверки
+    нет; с адреса дата-центра она появляется на любом запросе.
+
+    Повтор не поможет: пока запрос идёт с недоверенного адреса, ответом всегда
+    будет та же страница. Отличать её от `AuthError` и 5xx обязательно — иначе
+    «кабинет требует проверку» превратится в «неверный пароль».
+    """
+
+
 class TemporaryError(RanepaError):
     """Кабинет недоступен или отвечает ошибкой — имеет смысл повторить позже."""
 
@@ -272,6 +287,11 @@ class RanepaClient:
         raise last_error or TemporaryError("Запрос не удался")
 
     def _handle(self, response: httpx.Response) -> Any:
+        if _looks_like_challenge(response):
+            # HTML с антибот-скриптом приходит с кодом 200 — если не поймать его
+            # здесь, попытка разобрать JSON ниже даст невнятную TemporaryError,
+            # а на входе — ложное «неверный пароль».
+            raise ChallengeError("Кабинет требует браузерную проверку с этого адреса")
         if response.status_code in (401, 403):
             # Оба кода приходят от разных сторон: 401 — от самого кабинета,
             # 403 без JSON — обычно от WAF, и лечится это по-разному.
@@ -322,6 +342,19 @@ def _looks_like_waf(response: httpx.Response) -> bool:
         return False
     content_type = response.headers.get("content-type", "")
     return "json" not in content_type.lower()
+
+
+# Маркеры антибот-страницы: имя функции-хеша в скрипте и cookie, которую он
+# читает. Оба стабильны и присутствуют вместе только на странице проверки.
+_CHALLENGE_MARKERS = ("get_jhash", "__js_p_")
+
+
+def _looks_like_challenge(response: httpx.Response) -> bool:
+    content_type = response.headers.get("content-type", "").lower()
+    if "html" not in content_type:
+        return False
+    body = response.text
+    return any(marker in body for marker in _CHALLENGE_MARKERS)
 
 
 def _tokens_from_payload(payload: Any) -> Tokens:

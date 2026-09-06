@@ -13,7 +13,13 @@ from dataclasses import dataclass
 
 from app.db.models import User
 from app.db.repo import UserRepository
-from app.ranepa.client import AuthError, BlockedError, RanepaClient, RanepaError
+from app.ranepa.client import (
+    AuthError,
+    BlockedError,
+    ChallengeError,
+    RanepaClient,
+    RanepaError,
+)
 from app.ranepa.models import StudentProfile
 from app.ranepa.parser import ScheduleParseError, parse_student_profile
 from app.services.sync import ScheduleSyncService, SyncError
@@ -58,6 +64,12 @@ class AccountService:
             try:
                 tokens = await client.login(login, password)
                 raw_groups = await client.get_student_groups()
+            except ChallengeError as exc:
+                raise CabinetUnavailable(
+                    "Кабинет требует браузерную проверку с адреса, где работает "
+                    "бот, и вход через него сейчас невозможен. Это ограничение "
+                    "на стороне кабинета, а не ошибка логина или пароля."
+                ) from exc
             except BlockedError as exc:
                 raise CabinetUnavailable(
                     "Кабинет отклонил запрос. Обычно это временно — "

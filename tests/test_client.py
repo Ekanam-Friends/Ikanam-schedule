@@ -16,6 +16,7 @@ import pytest
 from app.ranepa.client import (
     AuthError,
     BlockedError,
+    ChallengeError,
     RanepaClient,
     TemporaryError,
     Tokens,
@@ -117,6 +118,47 @@ async def test_waf_block_is_distinguished_from_bad_credentials():
             await client.login("a", "b")
 
 
+CHALLENGE_PAGE = (
+    '<html><head><meta name="robots" content="noindex" /></head><body>'
+    "<script>function get_jhash(b){return 0;}"
+    "setTimeout(function(){var c=get_param('__js_p_','int',0);},1000);</script>"
+    "</body></html>"
+)
+
+
+async def test_js_challenge_is_recognized_not_treated_as_bad_json():
+    """Антибот-страница приходит с кодом 200 и HTML — это не «неверный ответ»,
+    а отдельное состояние: кабинет требует браузерную проверку с этого адреса."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=CHALLENGE_PAGE,
+            headers={
+                "content-type": "text/html; charset=utf-8",
+                "set-cookie": "__js_p_=1,2,0,0,0; Path=/",
+            },
+        )
+
+    async with client_with(handler) as client:
+        with pytest.raises(ChallengeError):
+            await client.login("a", "b")
+
+
+async def test_js_challenge_is_not_mistaken_for_bad_credentials():
+    """Проверка не должна выглядеть как AuthError: иначе пользователю скажут
+    «неверный пароль» там, где пароль вообще не при чём."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=CHALLENGE_PAGE, headers={"content-type": "text/html"})
+
+    async with client_with(handler) as client:
+        with pytest.raises(ChallengeError):
+            await client.login("a", "b")
+        # ChallengeError не наследуется от AuthError — повтор входа его не ловит.
+        assert not issubclass(ChallengeError, AuthError)
+
+
 async def test_schedule_repeats_filters_and_dates():
     """Даты перечисляются по одной: диапазона кабинет не понимает."""
     seen: dict = {}
@@ -204,9 +246,7 @@ async def test_persistent_server_error_raises_temporary():
 async def test_refresh_replaces_tokens():
     def handler(request: httpx.Request) -> httpx.Response:
         assert b"refresh-1" in request.content
-        return httpx.Response(
-            200, json={"access_token": "access-2", "refresh_token": "refresh-2"}
-        )
+        return httpx.Response(200, json={"access_token": "access-2", "refresh_token": "refresh-2"})
 
     async with client_with(handler, tokens=Tokens("access-1", "refresh-1")) as client:
         tokens = await client.refresh()
@@ -231,9 +271,7 @@ async def test_expired_token_is_refreshed_before_use():
         calls.append(request.url.path)
         return httpx.Response(200, json={"access_token": "new", "refresh_token": "new-r"})
 
-    expired = Tokens(
-        "old", "old-r", expires_at=datetime.now(timezone.utc) - timedelta(minutes=5)
-    )
+    expired = Tokens("old", "old-r", expires_at=datetime.now(timezone.utc) - timedelta(minutes=5))
     async with client_with(handler, tokens=expired) as client:
         await client.ensure_access()
 
@@ -330,7 +368,9 @@ async def test_login_keeps_fszet_and_refresh_sends_it_as_header():
         refreshed = await client.refresh()
 
     assert seen["fszet"] == "fz-secret"
-    assert refreshed.fszet == "fz-secret", "refresh не возвращает fszet — прежний должен сохраниться"
+    assert refreshed.fszet == "fz-secret", (
+        "refresh не возвращает fszet — прежний должен сохраниться"
+    )
 
 
 async def test_refresh_without_fszet_sends_no_empty_header():
