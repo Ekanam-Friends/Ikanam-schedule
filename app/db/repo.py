@@ -218,14 +218,16 @@ class UserRepository:
             digest = _content_hash(lesson)
             row = existing.get(lesson.uid)
             if row is None:
-                self._session.add(
-                    LessonRevision(
-                        user_id=user.telegram_id,
-                        lesson_uid=lesson.uid,
-                        sequence=0,
-                        content_hash=digest,
-                    )
+                row = LessonRevision(
+                    user_id=user.telegram_id,
+                    lesson_uid=lesson.uid,
+                    sequence=0,
+                    content_hash=digest,
                 )
+                self._session.add(row)
+                # Запоминаем сразу: второй экземпляр того же UID в этом же
+                # расписании иначе стал бы второй строкой и упал на уникальности.
+                existing[lesson.uid] = row
             elif row.content_hash != digest:
                 row.sequence += 1
                 row.content_hash = digest

@@ -119,6 +119,20 @@ async def test_reconnect_reactivates_user(repo):
     assert user.last_sync_error is None
 
 
+async def test_bump_revisions_survives_duplicate_uid_in_one_schedule(repo):
+    """Страховка на случай, если дубликат UID всё же дошёл до базы: одна
+    строка ревизии, а не IntegrityError на коммите."""
+    user = await repo.connect(1, refresh_token="r", access_valid_until=None, profile=PROFILE)
+    schedule = sample_schedule()
+    first = schedule.days[0].lessons[0]
+    schedule.days[0].lessons.append(first)
+
+    await repo.bump_revisions(user, schedule)
+    rows = (await repo._session.execute(select(LessonRevision))).scalars().all()
+
+    assert [r.lesson_uid for r in rows].count(first.uid) == 1
+
+
 async def test_schedule_round_trip(repo):
     user = await repo.connect(1, refresh_token="r", access_valid_until=None, profile=PROFILE)
     await repo.save_schedule(user, sample_schedule())

@@ -156,7 +156,7 @@ class RanepaClient:
         )
         self.tokens = tokens
         self._solver = challenge_solver
-        self._challenge_cookies_applied = False
+        self._challenge_cookies: dict[str, str] | None = None
 
     async def __aenter__(self) -> RanepaClient:
         return self
@@ -274,7 +274,7 @@ class RanepaClient:
                 raise AuthError("Нет токена доступа")
             headers["Authorization"] = f"Bearer {self.tokens.access_token}"
 
-        if self._solver is not None and not self._challenge_cookies_applied:
+        if self._solver is not None and self._challenge_cookies is None:
             await self._apply_challenge_cookies()
 
         last_error: Exception | None = None
@@ -297,7 +297,7 @@ class RanepaClient:
                     # сразу: ждать тут нечего, кабинет жив и отвечает.
                     challenge_retried = True
                     log.info("Кабинет снова показал проверку — обновляем cookie")
-                    await self._apply_challenge_cookies(refresh=True)
+                    await self._apply_challenge_cookies(rejected=self._challenge_cookies)
                     continue
                 except TemporaryError as exc:
                     # Пятисотки кабинета — такой же повод повторить, как обрыв
@@ -314,16 +314,16 @@ class RanepaClient:
 
         raise last_error or TemporaryError("Запрос не удался")
 
-    async def _apply_challenge_cookies(self, *, refresh: bool = False) -> None:
+    async def _apply_challenge_cookies(self, *, rejected: dict[str, str] | None = None) -> None:
         assert self._solver is not None
         try:
-            cookies = await self._solver.cookies(refresh=refresh)
+            cookies = await self._solver.cookies(rejected=rejected)
         except Exception as exc:  # noqa: BLE001 — нет браузера, таймаут, сеть: причина любая
             raise ChallengeError(f"Не удалось пройти браузерную проверку кабинета: {exc}") from exc
         host = self._client.base_url.host
         for name, value in cookies.items():
             self._client.cookies.set(name, value, domain=host)
-        self._challenge_cookies_applied = True
+        self._challenge_cookies = cookies
 
     def _handle(self, response: httpx.Response) -> Any:
         if _looks_like_challenge(response):

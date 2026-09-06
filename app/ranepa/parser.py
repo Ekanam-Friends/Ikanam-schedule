@@ -83,10 +83,25 @@ def _parse_day(raw_day: Any) -> DaySchedule | None:
         return None
 
     lessons: list[Lesson] = []
+    seen: set[str] = set()
     for raw_lesson in raw_day.get("discs") or []:
         lesson = _parse_lesson(raw_lesson, day)
-        if lesson is not None:
-            lessons.append(lesson)
+        if lesson is None:
+            continue
+        if lesson.uid in seen:
+            # Кабинет отдаёт одну пару дважды — например, для двух подгрупп
+            # или с двумя преподавателями. UID у них один (дата, время,
+            # предмет), а календарь и таблица ревизий требуют уникальности:
+            # второй экземпляр ломал /login на коммите. Оставляем первый.
+            log.warning(
+                "Пара %s %s «%s» пришла дважды — оставлена первая",
+                day,
+                lesson.start.time(),
+                lesson.subject,
+            )
+            continue
+        seen.add(lesson.uid)
+        lessons.append(lesson)
 
     return DaySchedule(day=day, lessons=lessons)
 

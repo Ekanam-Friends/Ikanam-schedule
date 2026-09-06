@@ -168,9 +168,10 @@ class FakeSolver:
     def __init__(self, *cookie_sets: dict[str, str]) -> None:
         self._sets = list(cookie_sets)
         self.calls: list[bool] = []
+        """Что просили: False — «дай cookie», True — «эти отвергнуты, дай другие»."""
 
-    async def cookies(self, *, refresh: bool = False) -> dict[str, str]:
-        self.calls.append(refresh)
+    async def cookies(self, *, rejected: dict[str, str] | None = None) -> dict[str, str]:
+        self.calls.append(rejected is not None)
         return dict(self._sets.pop(0) if len(self._sets) > 1 else self._sets[0])
 
 
@@ -218,7 +219,7 @@ async def test_challenge_persisting_after_renewal_is_reported_not_looped():
 
 async def test_solver_failure_is_a_challenge_error_not_a_crash():
     class BrokenSolver:
-        async def cookies(self, *, refresh: bool = False) -> dict[str, str]:
+        async def cookies(self, *, rejected: dict[str, str] | None = None) -> dict[str, str]:
             raise RuntimeError("chromium не стартовал")
 
     async with client_with(

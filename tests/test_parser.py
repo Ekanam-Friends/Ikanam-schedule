@@ -98,6 +98,20 @@ def test_broken_lesson_is_skipped_not_fatal(payload):
     assert len(day.lessons) == 2
 
 
+def test_duplicate_lesson_in_a_day_is_kept_once(payload):
+    """Кабинет отдаёт одну пару дважды (две подгруппы, два преподавателя).
+    UID у них один, а календарь и база требуют уникальности — регрессия:
+    второй экземпляр ронял /login на коммите."""
+    discs = payload["days"][0]["discs"]
+    twin = dict(discs[0], lecturer="Другой Преподаватель", room="1 - 101 (10)")
+    discs.append(twin)
+
+    day = parse_schedule(payload).day_for(date(2026, 9, 23))
+
+    assert len(day.lessons) == 2
+    assert len({lesson.uid for lesson in day.lessons}) == 2
+
+
 def test_day_without_date_is_skipped(payload):
     payload["days"].append({"date": None, "discs": []})
 

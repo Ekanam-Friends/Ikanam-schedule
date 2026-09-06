@@ -11,7 +11,7 @@ import pytest
 
 from app.ranepa.challenge import (
     DEFAULT_TTL,
-    REFRESH_DEBOUNCE,
+    MIN_LIFETIME,
     SAFETY_MARGIN,
     ChallengeSolveError,
     ChallengeSolver,
@@ -64,41 +64,43 @@ async def test_cookies_are_resolved_after_expiry():
     assert solver.launches == 2
 
 
-async def test_refresh_forces_a_new_solve_when_cookies_are_not_brand_new():
+async def test_rejected_current_cookies_are_resolved_even_seconds_after_issue():
+    """Кабинет бракует только что выданные cookie — наблюдалось вживую через
+    две секунды после выдачи. Возраст снимка ничего не значит: отвергнут — решаем."""
     clock = FakeClock()
     solver = StubSolver(clock)
 
-    await solver.cookies()
-    clock.now += REFRESH_DEBOUNCE + 1
-    renewed = await solver.cookies(refresh=True)
+    first = await solver.cookies()
+    clock.now += 2
+    renewed = await solver.cookies(rejected=first)
 
     assert renewed["__jhash_"] == "h2"
     assert solver.launches == 2
 
 
-async def test_refresh_right_after_solve_does_not_launch_again():
-    """Четыре синхронизации разом поймали истёкшие cookie и просят «перерешай»:
-    первая запускает браузер, остальные получают её результат."""
+async def test_rejected_stale_cookies_get_the_already_renewed_ones():
+    """Четыре синхронизации разом поймали отказ: первая перерешала, остальные
+    приносят уже устаревший снимок и получают её результат без браузера."""
     clock = FakeClock()
     solver = StubSolver(clock)
 
-    await solver.cookies()
-    clock.now += 5
+    first = await solver.cookies()
+    renewed = await solver.cookies(rejected=first)
     for _ in range(3):
-        again = await solver.cookies(refresh=True)
-        assert again["__jhash_"] == "h1"
+        again = await solver.cookies(rejected=first)
+        assert again == renewed
 
-    assert solver.launches == 1
+    assert solver.launches == 2
 
 
-async def test_short_ttl_still_keeps_cookies_for_debounce_window():
+async def test_short_ttl_still_keeps_cookies_for_a_minimum_lifetime():
     """Кабинет назвал срок меньше запаса безопасности — не превращаем это в
     браузер на каждый запрос."""
     clock = FakeClock()
     solver = StubSolver(clock, ttl=10.0)
 
     await solver.cookies()
-    clock.now += REFRESH_DEBOUNCE - 1
+    clock.now += MIN_LIFETIME - 1
     await solver.cookies()
 
     assert solver.launches == 1

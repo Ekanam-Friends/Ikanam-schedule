@@ -49,10 +49,9 @@ DEFAULT_TTL = 25 * 60.0
 SAFETY_MARGIN = 60.0
 """За сколько секунд до истечения считать cookie уже негодными."""
 
-REFRESH_DEBOUNCE = 30.0
-"""Если проверку прошли только что, повторная просьба «перерешай» получает
-тот же результат: четыре параллельных синхронизации, разом поймавшие
-истёкшие cookie, не должны поднимать четыре Chromium."""
+MIN_LIFETIME = 30.0
+"""Нижняя граница срока cookie в кэше: даже если кабинет назвал срок меньше
+запаса безопасности, браузер не должен подниматься на каждый запрос."""
 
 CONFIRM_TIMEOUT = 25.0
 SETTLE_SECONDS = 1.5
@@ -70,9 +69,15 @@ class ChallengeSolveError(Exception):
 
 
 class CookieSource(Protocol):
-    """То, что нужно клиенту кабинета: отдать cookie, при необходимости свежие."""
+    """То, что нужно клиенту кабинета: отдать cookie, а если кабинет отверг
+    выданные — свежие.
 
-    async def cookies(self, *, refresh: bool = False) -> dict[str, str]: ...
+    `rejected` — снимок, который кабинет не принял. Решатель сравнивает его с
+    тем, что у него на руках: если это тот же снимок, решает заново; если уже
+    другой (перерешал кто-то параллельно), отдаёт его без нового браузера.
+    """
+
+    async def cookies(self, *, rejected: dict[str, str] | None = None) -> dict[str, str]: ...
 
 
 @dataclass(slots=True)
@@ -98,21 +103,24 @@ class ChallengeSolver:
         self._lock = asyncio.Lock()
         self._solved: _Solved | None = None
 
-    async def cookies(self, *, refresh: bool = False) -> dict[str, str]:
+    async def cookies(self, *, rejected: dict[str, str] | None = None) -> dict[str, str]:
         async with self._lock:
-            now = self._clock()
             cached = self._solved
             if cached is not None:
-                fresh = now < cached.valid_until
-                just_solved = now - cached.solved_at < REFRESH_DEBOUNCE
-                if (fresh and not refresh) or just_solved:
+                fresh = self._clock() < cached.valid_until
+                # Отвергнут именно наш текущий снимок — значит, он негоден,
+                # сколько бы ни было ему секунд: кабинет иногда бракует cookie
+                # через пару секунд после выдачи. Отвергнут какой-то другой —
+                # его уже заменили, и повторно решать незачем.
+                superseded = rejected is not None and rejected != cached.cookies
+                if (fresh and rejected is None) or superseded:
                     return dict(cached.cookies)
             cookies, ttl = await self._solve()
             solved_at = self._clock()
             self._solved = _Solved(
                 cookies=cookies,
                 solved_at=solved_at,
-                valid_until=solved_at + max(ttl - SAFETY_MARGIN, REFRESH_DEBOUNCE),
+                valid_until=solved_at + max(ttl - SAFETY_MARGIN, MIN_LIFETIME),
             )
             log.info("Проверка кабинета пройдена, cookie действуют ещё %.0f мин", ttl / 60)
             return dict(cookies)
