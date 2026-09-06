@@ -24,6 +24,21 @@ services:
       timeout: 3s
       retries: 10
 
+  # Прокси до Telegram. Нужен, когда хостинг в России: api.telegram.org там
+  # режется по SNI, а кабинет РАНХиГС, наоборот, доступен только с российского
+  # адреса. Бот ходит в Telegram через этот контейнер (TELEGRAM_PROXY в .env),
+  # а в кабинет — напрямую. Конфиг sing-box лежит в ./proxy/config.json и в
+  # репозиторий не попадает: в нём ключи от серверов.
+  proxy:
+    image: ghcr.io/sagernet/sing-box:latest
+    restart: unless-stopped
+    profiles: ["proxy"]
+    volumes:
+      - ./proxy/config.json:/etc/sing-box/config.json:ro
+    command: ["run", "-c", "/etc/sing-box/config.json"]
+    expose:
+      - "1080"
+
   bot:
     build: .
     restart: unless-stopped

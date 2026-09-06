@@ -28,3 +28,6 @@ venv/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# конфиг прокси до Telegram: ключи от серверов
+proxy/
