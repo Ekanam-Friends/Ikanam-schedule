@@ -18,9 +18,11 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
+from aiogram.types import BufferedInputFile
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.formatting import format_date, format_day
@@ -32,6 +34,7 @@ from app.db.repo import UserRepository
 from app.db.session import session_scope
 from app.ranepa.client import RanepaClient
 from app.services.notify import format_changes
+from app.services.stats import collect, format_summary, render_chart
 from app.services.sync import ReauthRequired, ScheduleSyncService, SyncError
 
 log = logging.getLogger(__name__)
@@ -75,6 +78,20 @@ def token_is_stale(user: User, *, now: datetime, max_age_days: int) -> bool:
     if anchor.tzinfo is None:
         anchor = anchor.replace(tzinfo=timezone.utc)
     return now - anchor > timedelta(days=max_age_days)
+
+
+def seconds_until_local(clock: str, tz: str, *, now: datetime) -> float:
+    """Сколько ждать до ближайших «ЧЧ:ММ» в указанном часовом поясе.
+
+    Считается в самом поясе, поэтому переход на летнее время не сдвигает
+    момент: 06:00 по Киеву остаётся 06:00 и в июле, и в декабре.
+    """
+    hours, minutes = (int(part) for part in clock.split(":"))
+    local_now = now.astimezone(ZoneInfo(tz))
+    target = local_now.replace(hour=hours, minute=minutes, second=0, microsecond=0)
+    if target <= local_now:
+        target += timedelta(days=1)
+    return (target - local_now).total_seconds()
 
 
 def digest_is_due(user: User, *, now: datetime, last_sent: date | None) -> bool:
@@ -237,6 +254,47 @@ async def send_due_digests(ctx: SchedulerContext, *, now: datetime | None = None
     return sent
 
 
+async def run_owner_stats_loop(ctx: SchedulerContext) -> None:
+    """Раз в сутки, в OWNER_STATS_AT по OWNER_STATS_TZ, прислать владельцу сводку."""
+    clock = ctx.settings.owner_stats_at
+    if clock is None or ctx.settings.owner_chat_id is None:
+        return
+    while True:
+        delay = seconds_until_local(
+            clock, ctx.settings.owner_stats_tz, now=datetime.now(timezone.utc)
+        )
+        log.info("Утренняя сводка владельцу через %.0f мин", delay / 60)
+        await asyncio.sleep(delay)
+        try:
+            await send_owner_stats(ctx)
+        except Exception:  # noqa: BLE001 — петля переживает любое утро
+            log.exception("Утренняя сводка владельцу не отправилась")
+        # Секунда форы, чтобы не отправить дважды в ту же минуту.
+        await asyncio.sleep(1)
+
+
+async def send_owner_stats(ctx: SchedulerContext) -> bool:
+    """Собрать сводку и отправить владельцу текстом и картинкой."""
+    owner = ctx.settings.owner_chat_id
+    if owner is None:
+        return False
+    async with session_scope(ctx.session_factory) as session:
+        repo = UserRepository(session, ctx.cipher)
+        stats = await collect(repo, ActivityLog(session))
+    if not await _send(ctx.bot, owner, format_summary(stats)):
+        return False
+    try:
+        png = await asyncio.to_thread(render_chart, stats)
+    except Exception:  # noqa: BLE001 — цифры ушли, картинка не обязана ломать утро
+        log.exception("Не удалось построить график для утренней сводки")
+        return True
+    try:
+        await ctx.bot.send_photo(owner, BufferedInputFile(png, filename="stats.png"))
+    except TelegramAPIError as exc:
+        log.warning("Не удалось отправить график владельцу: %s", exc)
+    return True
+
+
 async def report_to_owner(ctx: SchedulerContext, report: NightlyReport) -> None:
     """Алерт владельцу: только когда есть о чём.
 
@@ -276,4 +334,5 @@ def start_background_tasks(ctx: SchedulerContext) -> list[asyncio.Task]:
     return [
         asyncio.create_task(run_nightly_loop(ctx), name="nightly-sync"),
         asyncio.create_task(run_digest_loop(ctx), name="morning-digest"),
+        asyncio.create_task(run_owner_stats_loop(ctx), name="owner-stats"),
     ]

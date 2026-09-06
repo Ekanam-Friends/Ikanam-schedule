@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     """Куда бот пишет, что синхронизация сломалась. Без него о поломке узнают
     только пользователи, а это ровно тот сценарий, который убивает такие проекты."""
 
+    owner_stats_at: str | None = Field(default="06:00", alias="OWNER_STATS_AT")
+    """Когда присылать владельцу утреннюю сводку `/stats`, «ЧЧ:ММ» в поясе
+    `OWNER_STATS_TZ`. Пусто — не присылать. Без `OWNER_CHAT_ID` не работает."""
+
+    owner_stats_tz: str = Field(default="Europe/Kyiv", alias="OWNER_STATS_TZ")
+    """Часовой пояс для `OWNER_STATS_AT`, имя из базы tz. Именно пояс, а не
+    сдвиг: у Киева летнее время, у Москвы нет, и «6:00» должно оставаться 6:00."""
+
     telegram_proxy: str | None = Field(default=None, alias="TELEGRAM_PROXY")
     """Прокси до api.telegram.org, например `socks5://user:pass@host:1080`.
 
@@ -76,6 +84,32 @@ class Settings(BaseSettings):
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("owner_stats_at", mode="before")
+    @classmethod
+    def _valid_clock(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            hours, sep, minutes = value.partition(":")
+            if not (sep and hours.isdigit() and minutes.isdigit()):
+                raise ValueError("OWNER_STATS_AT: нужно время вида 06:00")
+            if not (0 <= int(hours) <= 23 and 0 <= int(minutes) <= 59):
+                raise ValueError("OWNER_STATS_AT: часы 0–23, минуты 0–59")
+            return f"{int(hours):02d}:{int(minutes):02d}"
+        return value
+
+    @field_validator("owner_stats_tz")
+    @classmethod
+    def _known_timezone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"OWNER_STATS_TZ: неизвестный часовой пояс {value!r}") from exc
+        return value
 
     @field_validator("owner_chat_id", mode="before")
     @classmethod

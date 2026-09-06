@@ -54,6 +54,9 @@ class OwnerStats:
     def today(self) -> dict[str, int]:
         return self.by_day.get(self.days[-1], {}) if self.days else {}
 
+    def yesterday(self) -> dict[str, int]:
+        return self.by_day.get(self.days[-2], {}) if len(self.days) > 1 else {}
+
 
 def series_totals(counts: dict[str, int]) -> dict[str, int]:
     """Свернуть виды событий в группы для графика."""
@@ -157,45 +160,67 @@ def format_summary(stats: OwnerStats) -> str:
     ]
     if top:
         lines.append(f"Команды: {top}")
+    yesterday = series_totals(stats.yesterday())
+    if any(yesterday.values()):
+        # Утренняя сводка приходит, когда «сегодня» — это только ночная
+        # синхронизация; живая картина дня лежит во «вчера».
+        lines.append(
+            f"<b>Вчера</b>: команд {yesterday['Команды']}, синхронизаций "
+            f"{yesterday['Синхронизации']}, ошибок {yesterday['Ошибки синхр.']}, "
+            f"календарей {yesterday['Календари']}, подключений {yesterday['Подключения']}"
+        )
     return "\n".join(lines)
 
 
 def render_chart(stats: OwnerStats) -> bytes:
-    """Две панели: события по дням и профиль по часам. PNG."""
+    """Две панели: линии по дням и раздельные столбцы по часам. PNG."""
     # matplotlib импортируется здесь, а не наверху: он тяжёлый и нужен только
     # владельцу раз в день, остальному боту незачем платить за его загрузку.
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
 
     fig, (top, bottom) = plt.subplots(2, 1, figsize=(10, 8), dpi=100)
     fig.patch.set_facecolor("white")
 
-    names = [name for name, _ in SERIES]
+    # По дням — линии: видно динамику каждой серии отдельно, а не сумму.
     per_day = [series_totals(stats.by_day.get(day, {})) for day in stats.days]
-    positions = range(len(stats.days))
-    bottoms = [0] * len(stats.days)
-    for name in names:
+    positions = list(range(len(stats.days)))
+    for name, _ in SERIES:
         values = [totals[name] for totals in per_day]
-        top.bar(positions, values, bottom=bottoms, label=name, width=0.7)
-        bottoms = [b + v for b, v in zip(bottoms, values, strict=True)]
-    top.set_xticks(list(positions))
+        if not any(values):
+            continue
+        top.plot(positions, values, marker="o", markersize=4, linewidth=1.8, label=name)
+    top.set_xticks(positions)
     top.set_xticklabels([f"{day:%d.%m}" for day in stats.days], rotation=45, fontsize=8)
     top.set_title(f"События по дням, последние {len(stats.days)} дн.")
-    top.legend(fontsize=8, ncol=len(names))
-    top.grid(axis="y", alpha=0.3)
+    top.yaxis.set_major_locator(MaxNLocator(integer=True))
+    top.set_ylim(bottom=0)
+    top.grid(alpha=0.3)
+    if top.get_legend_handles_labels()[0]:
+        top.legend(fontsize=8, ncol=len(SERIES))
+    else:
+        top.text(0.5, 0.5, "Пока нет данных", ha="center", va="center", transform=top.transAxes)
 
+    # По часам — раздельные столбцы: три серии, которые имеют суточный ритм.
     hours = list(range(24))
-    commands = [series_totals(stats.by_hour.get(hour, {}))["Команды"] for hour in hours]
-    others = [
-        sum(series_totals(stats.by_hour.get(hour, {})).values()) - commands[hour] for hour in hours
-    ]
-    bottom.bar(hours, commands, label="Команды", width=0.8)
-    bottom.bar(hours, others, bottom=commands, label="Остальное", width=0.8)
+    hourly = [series_totals(stats.by_hour.get(hour, {})) for hour in hours]
+    shown = ("Команды", "Календари", "Синхронизации")
+    width = 0.8 / len(shown)
+    for index, name in enumerate(shown):
+        offset = (index - (len(shown) - 1) / 2) * width
+        bottom.bar(
+            [hour + offset for hour in hours],
+            [totals[name] for totals in hourly],
+            width=width,
+            label=name,
+        )
     bottom.set_xticks(hours)
     bottom.set_xticklabels([f"{hour:02d}" for hour in hours], fontsize=8)
     bottom.set_title(f"По часам (МСК), последние {HOUR_PROFILE_DAYS} дн.")
+    bottom.yaxis.set_major_locator(MaxNLocator(integer=True))
     bottom.legend(fontsize=8)
     bottom.grid(axis="y", alpha=0.3)
 
