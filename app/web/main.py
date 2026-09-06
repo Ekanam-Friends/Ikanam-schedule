@@ -28,6 +28,7 @@ from fastapi.responses import HTMLResponse
 from app.calendar.ics import build_calendar
 from app.core.config import get_settings
 from app.core.crypto import CredentialsCipher
+from app.db.activity import ActivityLog
 from app.db.migrate import upgrade_to_head
 from app.db.repo import UserRepository
 from app.db.session import make_engine, make_session_factory, session_scope
@@ -139,6 +140,9 @@ async def _load_schedule(
         user = await repo.get_by_feed_token(token)
         if user is None:
             return None, None, None
+        # Для /stats: сколько раз календари приходили за расписанием. Токен и
+        # владелец не записываются — только факт.
+        await ActivityLog(session).record("feed")
         # Прошлые дни календарю не нужны, но неделя назад полезна: человек
         # видит, что было, и клиент не удаляет события задним числом.
         since = date.today() - timedelta(days=7)

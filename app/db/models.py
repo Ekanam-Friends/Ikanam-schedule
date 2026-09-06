@@ -8,7 +8,10 @@
   чем сравнить новую выгрузку и сказать «пару перенесли»;
 * :class:`LessonRevision` — счётчик правок каждой пары. Календари принимают
   обновление события, только если `SEQUENCE` вырос, поэтому его приходится
-  помнить между выгрузками.
+  помнить между выгрузками;
+* :class:`ActivityCounter` — сколько событий какого вида случилось за час.
+  Без людей: статистика для владельца, которая не нарушает обещание не вести
+  след о чужих действиях.
 """
 
 from __future__ import annotations
@@ -195,3 +198,21 @@ class LessonRevision(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="revisions")
+
+
+class ActivityCounter(Base):
+    """Число событий одного вида за один час по Москве.
+
+    Единственная таблица без связи с пользователем — намеренно. См. `app/db/activity.py`.
+    """
+
+    __tablename__ = "activity_counters"
+    __table_args__ = (UniqueConstraint("day", "hour", "kind", name="uq_activity_slot"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    hour: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32))
+    """`cmd:today`, `sync:ok`, `feed` и т. п. — см. `app/db/activity.py`."""
+
+    count: Mapped[int] = mapped_column(Integer, default=0)
