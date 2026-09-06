@@ -94,10 +94,6 @@ python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).dec
 Запросы к кабинету через прокси не идут: у двух адресатов противоположные требования,
 подробнее в [docs/api-notes.md](docs/api-notes.md).
 
-## Статус
-
-Проект в разработке. Дорожная карта — в [docs/roadmap.md](docs/roadmap.md).
-
 ## Лицензия
 
-[MIT](LICENSE) — команда Ekanam Friends.
+[MIT](LICENSE) — команда Ekanam&Friends.
