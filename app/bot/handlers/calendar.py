@@ -91,7 +91,13 @@ async def on_calendar_file(query: CallbackQuery, repo: UserRepository) -> None:
         await query.answer("Пар на ближайшие недели нет — файл был бы пустым.", show_alert=True)
         return
 
-    body = build_calendar(schedule, reminder_minutes=user.reminder_minutes)
+    # Ревизии и в файле тоже: если человек импортирует его повторно, календарь
+    # обновит уже известные события, а не создаст дубликаты.
+    body = build_calendar(
+        schedule,
+        reminder_minutes=user.reminder_minutes,
+        sequences=await repo.sequences_for(user),
+    )
     await query.message.answer_document(
         BufferedInputFile(body, filename=f"ranepa-{today.isoformat()}.ics"),
         caption=(

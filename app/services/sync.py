@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 from app.db.models import User
@@ -17,6 +17,7 @@ from app.db.repo import UserRepository
 from app.ranepa.client import AuthError, RanepaClient, RanepaError, Tokens
 from app.ranepa.models import Schedule
 from app.ranepa.parser import ScheduleParseError, parse_schedule
+from app.services.diff import Change, diff_schedules
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,8 @@ DEFAULT_HORIZON_DAYS = 21
 class SyncResult:
     schedule: Schedule
     lessons_count: int
+    changes: list[Change] = field(default_factory=list)
+    """Что изменилось по сравнению с прошлым снапшотом — материал для пуша."""
 
 
 class SyncError(Exception):
@@ -94,15 +97,29 @@ class ScheduleSyncService:
             await self._repo.mark_failed(user, error=f"Формат ответа: {exc}")
             raise SyncError(str(exc)) from exc
 
-        await self._repo.save_schedule(user, schedule)
-        await self._repo.mark_synced(user, when=schedule.fetched_at or datetime.now(timezone.utc))
+        # Сравниваем с тем, что лежало в базе: отсюда берутся отмены и
+        # переносы (кабинет их не отдаёт), а исчезнувшие пары остаются в
+        # снапшоте с пометкой, чтобы календарь не «воскресил» их.
+        previous = await self._repo.load_schedule(user, since=days[0], until=days[-1])
+        diff = diff_schedules(previous, schedule)
+        merged = diff.merged
+
+        await self._repo.save_schedule(user, merged)
+        bumped = await self._repo.bump_revisions(user, merged)
+        await self._repo.mark_synced(user, when=merged.fetched_at or datetime.now(timezone.utc))
         log.info(
-            "Синхронизировано: пользователь %s, дней %d, пар %d",
+            "Синхронизировано: пользователь %s, дней %d, пар %d, изменений %d, ревизий %d",
             user.telegram_id,
-            len(schedule.days),
-            len(schedule.lessons),
+            len(merged.days),
+            len(merged.lessons),
+            len(diff.changes),
+            bumped,
         )
-        return SyncResult(schedule=schedule, lessons_count=len(schedule.lessons))
+        return SyncResult(
+            schedule=merged,
+            lessons_count=sum(1 for lesson in merged.lessons if not lesson.cancelled),
+            changes=diff.changes,
+        )
 
 
 MOSCOW_OFFSET = timezone(timedelta(hours=3))

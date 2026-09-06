@@ -27,6 +27,7 @@ from app.bot.handlers import account as account_handlers
 from app.bot.handlers import calendar as calendar_handlers
 from app.bot.handlers import schedule as schedule_handlers
 from app.bot.retry import RetryOnNetworkError
+from app.bot.scheduler import SchedulerContext, start_background_tasks
 from app.bot.storage import SQLAlchemyStorage
 from app.bot.texts import build_start_message
 from app.core.config import get_settings
@@ -149,6 +150,17 @@ async def main() -> None:
     dispatcher.include_router(calendar_handlers.router)
     dispatcher.include_router(router)
 
+    # Ночная синхронизация и утренняя сводка живут в том же процессе: две
+    # asyncio-задачи рядом с polling, без отдельного планировщика.
+    background = start_background_tasks(
+        SchedulerContext(
+            bot=bot,
+            settings=settings,
+            cipher=context.cipher,
+            session_factory=context.session_factory,
+        )
+    )
+
     try:
         await with_retries(lambda: register_commands(bot), what="регистрация команд")
         me = await with_retries(bot.get_me, what="проверка токена")
@@ -161,7 +173,11 @@ async def main() -> None:
 
     # Накопившиеся за время простоя апдейты не обрабатываем: отвечать на
     # вчерашний /today сегодняшним расписанием — только путать людей.
-    await dispatcher.start_polling(bot, drop_pending_updates=True)
+    try:
+        await dispatcher.start_polling(bot, drop_pending_updates=True)
+    finally:
+        for task in background:
+            task.cancel()
 
 
 if __name__ == "__main__":

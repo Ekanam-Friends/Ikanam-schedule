@@ -187,6 +187,74 @@ class UserRepository:
         return Schedule(days=days, fetched_at=fetched_at)
 
 
+    # --- Ревизии занятий для календаря ---
+
+    async def sequences_for(self, user: User) -> dict[str, int]:
+        """`SEQUENCE` каждой пары по её UID — для сборки календаря."""
+        result = await self._session.execute(
+            select(LessonRevision.lesson_uid, LessonRevision.sequence).where(
+                LessonRevision.user_id == user.telegram_id
+            )
+        )
+        return {uid: seq for uid, seq in result.all()}
+
+    async def bump_revisions(self, user: User, schedule: Schedule) -> int:
+        """Поднять `SEQUENCE` у пар, чьё содержимое изменилось.
+
+        Календарь применяет правку события, только если `SEQUENCE` вырос, —
+        и игнорирует её, если вырос без причины. Поэтому сравниваем отпечаток
+        содержимого: аудитория та же — ревизия та же, и клиенты ночью ничего
+        не перекачивают.
+
+        Returns:
+            Сколько пар получили новую ревизию.
+        """
+        result = await self._session.execute(
+            select(LessonRevision).where(LessonRevision.user_id == user.telegram_id)
+        )
+        existing = {row.lesson_uid: row for row in result.scalars()}
+
+        bumped = 0
+        for lesson in schedule.lessons:
+            digest = _content_hash(lesson)
+            row = existing.get(lesson.uid)
+            if row is None:
+                self._session.add(
+                    LessonRevision(
+                        user_id=user.telegram_id,
+                        lesson_uid=lesson.uid,
+                        sequence=0,
+                        content_hash=digest,
+                    )
+                )
+            elif row.content_hash != digest:
+                row.sequence += 1
+                row.content_hash = digest
+                bumped += 1
+        await self._session.flush()
+        return bumped
+
+
+def _content_hash(lesson: Lesson) -> str:
+    """Отпечаток того, что видит календарь: время, место, преподаватель, статус."""
+    import hashlib
+
+    raw = "|".join(
+        [
+            lesson.start.isoformat(),
+            lesson.end.isoformat(),
+            lesson.subject,
+            lesson.teacher or "",
+            lesson.room or "",
+            lesson.building or "",
+            lesson.lesson_format.value,
+            lesson.lesson_type or "",
+            "cancelled" if lesson.cancelled else "",
+        ]
+    )
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
 def _lesson_to_dict(lesson: Lesson) -> dict:
     data = asdict(lesson)
     data["start"] = lesson.start.isoformat()

@@ -84,7 +84,7 @@ app.state.cipher = None
 @app.get("/feed/{token}.ics")
 async def feed(token: str, request: Request) -> Response:
     """Отдать календарь по секретной ссылке."""
-    schedule, reminder = await _load_schedule(token)
+    schedule, reminder, sequences = await _load_schedule(token)
     if schedule is None:
         # Одинаковый ответ и на несуществующий, и на отозванный токен: разница в
         # ответах позволила бы перебором отличать живые ссылки от мёртвых.
@@ -95,6 +95,7 @@ async def feed(token: str, request: Request) -> Response:
         calendar_name="Расписание РАНХиГС",
         for_subscription=True,
         reminder_minutes=reminder,
+        sequences=sequences,
     )
 
     etag = '"%s"' % hashlib.sha1(body).hexdigest()
@@ -114,29 +115,35 @@ async def feed(token: str, request: Request) -> Response:
     )
 
 
-async def _load_schedule(token: str) -> tuple[Schedule | None, int | None]:
+async def _load_schedule(
+    token: str,
+) -> tuple[Schedule | None, int | None, dict[str, int] | None]:
     """Расписание по токену подписки: последний удачный снапшот из базы.
 
     Пользователь без снапшотов получает пустой календарь, а не 404: подписка
     у него есть, просто пар пока нет. 404 — только для чужих и отозванных
     токенов. Демо-токен остаётся для проверки клиентов без базы.
+
+    Третий элемент — номера ревизий пар (`SEQUENCE`): без них календарь не
+    примет правку уже известного события.
     """
     if token == DEMO_TOKEN:
-        return _demo_schedule(), None
+        return _demo_schedule(), None, None
 
     factory = app.state.session_factory
     if factory is None:
-        return None, None
+        return None, None, None
 
     async with session_scope(factory) as session:
         repo = UserRepository(session, app.state.cipher)
         user = await repo.get_by_feed_token(token)
         if user is None:
-            return None, None
+            return None, None, None
         # Прошлые дни календарю не нужны, но неделя назад полезна: человек
         # видит, что было, и клиент не удаляет события задним числом.
         since = date.today() - timedelta(days=7)
-        return await repo.load_schedule(user, since=since), user.reminder_minutes
+        schedule = await repo.load_schedule(user, since=since)
+        return schedule, user.reminder_minutes, await repo.sequences_for(user)
 
 
 def _demo_schedule() -> Schedule:
