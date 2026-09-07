@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import date
 from html import escape
 
-from app.bot.formatting import format_date
+from app.bot.formatting import format_date, lesson_title
 from app.ranepa.models import Lesson
 from app.ranepa.rooms import pretty_location
 from app.services.diff import Change, ChangeKind
@@ -47,7 +47,7 @@ def format_changes(changes: list[Change]) -> str | None:
 
 def _describe(change: Change) -> str:
     lesson = change.lesson
-    subject = escape(lesson.subject)
+    subject = lesson_title(lesson)
     time = f"{lesson.start:%H:%M}"
 
     if change.kind is ChangeKind.CANCELLED:

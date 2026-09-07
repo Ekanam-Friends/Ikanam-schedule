@@ -10,7 +10,9 @@ from app.bot.formatting import (
     format_lesson,
     format_missing_day,
     format_week,
+    lesson_title,
     short_building,
+    short_lesson_type,
 )
 from app.ranepa.models import DaySchedule, Lesson, LessonFormat, Schedule
 
@@ -42,6 +44,40 @@ def test_lesson_shows_time_room_building_and_teacher():
     assert "П+ПК" not in text and "(24)" not in text
     assert "корпус 5, Вернадского 82" in text
     assert "Козко Артем Иванович" in text
+
+
+def test_lesson_type_is_shown_after_subject():
+    text = format_lesson(lesson(lesson_type="Лекционные занятия"))
+
+    assert "Математический анализ (лекция)" in text
+    assert "Лекционные" not in text
+
+
+def test_lesson_without_type_has_no_brackets():
+    assert "(" not in lesson_title(lesson(lesson_type=None))
+    assert "(" not in lesson_title(lesson(lesson_type="  "))
+
+
+def test_cancelled_lesson_keeps_type_inside_strike():
+    text = format_lesson(lesson(cancelled=True, lesson_type="Практические занятия"))
+
+    assert "<s>Математический анализ (практика)</s> — отменена" in text
+
+
+def test_short_lesson_type_maps_known_and_passes_through_unknown():
+    assert short_lesson_type("Лекционные занятия") == "лекция"
+    assert short_lesson_type("Лекция") == "лекция"
+    assert short_lesson_type("Практические занятия") == "практика"
+    assert short_lesson_type("Практика") == "практика"
+    assert short_lesson_type("Консультация") == "консультация"
+    assert short_lesson_type(None) is None
+    assert short_lesson_type("") is None
+
+
+def test_html_in_lesson_type_is_escaped():
+    text = lesson_title(lesson(lesson_type="<b>зачёт</b>"))
+
+    assert "&lt;b&gt;зачёт&lt;/b&gt;" in text
 
 
 def test_distant_lesson_says_so_instead_of_room():

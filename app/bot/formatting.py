@@ -35,9 +35,34 @@ def format_date(day: date) -> str:
     return f"{WEEKDAYS[day.weekday()]}, {day.day} {MONTHS_GENITIVE[day.month - 1]}"
 
 
+def short_lesson_type(raw: str | None) -> str | None:
+    """«Лекционные занятия» → «лекция», «Практические занятия» → «практика».
+
+    Остальные типы (семинар, консультация, зачёт…) ЛК называет по-своему;
+    их отдаём как есть, строчными, чтобы ничего не потерять.
+    """
+    if not raw:
+        return None
+    lowered = raw.strip().lower()
+    if not lowered:
+        return None
+    if lowered.startswith("лекц"):
+        return "лекция"
+    if lowered.startswith("практи"):
+        return "практика"
+    return lowered
+
+
+def lesson_title(lesson: Lesson) -> str:
+    """Название пары с типом в скобках: «Матанализ (лекция)». Уже экранировано."""
+    subject = escape(lesson.subject)
+    kind = short_lesson_type(lesson.lesson_type)
+    return f"{subject} ({escape(kind)})" if kind else subject
+
+
 def format_lesson(lesson: Lesson) -> str:
     time = f"<b>{lesson.start:%H:%M}–{lesson.end:%H:%M}</b>"
-    subject = escape(lesson.subject)
+    subject = lesson_title(lesson)
     if lesson.cancelled:
         subject = f"<s>{subject}</s> — отменена"
 

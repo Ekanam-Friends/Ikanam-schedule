@@ -34,6 +34,13 @@ def test_cancellation_is_struck_through():
     assert "Понедельник, 7 сентября" in text
 
 
+def test_change_mentions_lesson_type():
+    change = Change(ChangeKind.ADDED, lesson(lesson_type="Лекционные занятия"))
+    text = format_changes([change])
+
+    assert "09:00 Матанализ (лекция) — добавлена" in text
+
+
 def test_move_names_both_times():
     change = Change(
         ChangeKind.MOVED,
