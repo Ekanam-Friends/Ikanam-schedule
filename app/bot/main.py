@@ -25,6 +25,7 @@ from aiogram.types import BotCommand, Message
 from app.bot.commands import COMMANDS
 from app.bot.deps import AppContext, DependenciesMiddleware
 from app.bot.handlers import account as account_handlers
+from app.bot.handlers import attendance as attendance_handlers
 from app.bot.handlers import calendar as calendar_handlers
 from app.bot.handlers import donate as donate_handlers
 from app.bot.handlers import schedule as schedule_handlers
@@ -153,6 +154,9 @@ async def main() -> None:
     # Порядок важен: диалог входа должен перехватывать текст раньше, чем
     # общие обработчики решат, что это неизвестная команда.
     dispatcher.include_router(account_handlers.router)
+    # Отметка по QR: фото и ссылки на qrcode.php должны попасть сюда раньше,
+    # чем общий обработчик текста решит, что это неизвестная команда.
+    dispatcher.include_router(attendance_handlers.router)
     dispatcher.include_router(schedule_handlers.router)
     dispatcher.include_router(calendar_handlers.router)
     dispatcher.include_router(settings_handlers.router)

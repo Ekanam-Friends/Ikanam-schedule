@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     # --- Шифрование учётных данных пользователей ---
     credentials_key: SecretStr = Field(alias="CREDENTIALS_KEY")
 
+    # --- Отметка посещаемости в СДО (обкатка на владельце) ---
+    lms_login: str | None = Field(default=None, alias="LMS_LOGIN")
+    lms_password: SecretStr | None = Field(default=None, alias="LMS_PASSWORD")
+    """Логин и пароль СДО `lms.ranepa.ru` для отметки по QR. На время обкатки —
+    только владельца, из окружения, а не из общей базы: массовое (шифрованное)
+    хранение включим отдельным решением, когда фича станет подпиской. Пусто —
+    отметка недоступна, бот об этом честно скажет. Работает только вместе с
+    `OWNER_CHAT_ID`: фото принимаем лишь от владельца."""
+
     # --- База ---
     database_url: str = Field(alias="DATABASE_URL")
 
@@ -109,6 +118,14 @@ class Settings(BaseSettings):
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise ValueError(f"OWNER_STATS_TZ: неизвестный часовой пояс {value!r}") from exc
+        return value
+
+    @field_validator("lms_login", "lms_password", mode="before")
+    @classmethod
+    def _blank_credential_absent(cls, value: object) -> object:
+        """Пустая строка в `.env` — «не задано»: креды СДО необязательны."""
+        if isinstance(value, str) and not value.strip():
+            return None
         return value
 
     @field_validator("owner_chat_id", mode="before")

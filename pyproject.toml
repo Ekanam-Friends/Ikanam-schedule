@@ -19,6 +19,8 @@ dependencies = [
     "aiohttp-socks>=0.9",
     "aiosqlite>=0.20",
     "matplotlib>=3.9",
+    "pillow>=10.0",
+    "pyzbar>=0.1.9",
 ]
 
 [project.optional-dependencies]
