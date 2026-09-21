@@ -11,7 +11,9 @@
   помнить между выгрузками;
 * :class:`ActivityCounter` — сколько событий какого вида случилось за час.
   Без людей: статистика для владельца, которая не нарушает обещание не вести
-  след о чужих действиях.
+  след о чужих действиях;
+* :class:`Broadcast` и :class:`BroadcastAnswer` — рассылка владельца и ответы
+  на неё. Ответы живут только до выгрузки в CSV.
 """
 
 from __future__ import annotations
@@ -216,3 +218,39 @@ class ActivityCounter(Base):
     """`cmd:today`, `sync:ok`, `feed` и т. п. — см. `app/db/activity.py`."""
 
     count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Broadcast(Base):
+    """Сообщение владельца всем пользователям.
+
+    Строка появляется до отправки — как черновик под кнопкой «Отправить»; её
+    `id` потом зашит в кнопку «Ответить», чтобы ответ знал, на какой вопрос он.
+    """
+
+    __tablename__ = "broadcasts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    """`text` — просто сообщение, `answer` — с кнопкой «Ответить»."""
+
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    """Когда владелец нажал «Отправить». Второе нажатие не шлёт рассылку повторно."""
+
+
+class BroadcastAnswer(Base):
+    """Ответ пользователя на рассылку. Удаляется, как только ушёл владельцу в CSV."""
+
+    __tablename__ = "broadcast_answers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    broadcast_id: Mapped[int] = mapped_column(
+        ForeignKey("broadcasts.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    """Без внешнего ключа на `users`: человек мог отключиться после ответа, а
+    ответ всё равно должен дойти до владельца."""
+
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

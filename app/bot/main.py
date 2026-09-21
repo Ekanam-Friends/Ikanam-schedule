@@ -25,6 +25,7 @@ from aiogram.types import BotCommand, Message
 from app.bot.commands import COMMANDS
 from app.bot.deps import AppContext, DependenciesMiddleware
 from app.bot.handlers import account as account_handlers
+from app.bot.handlers import broadcast as broadcast_handlers
 from app.bot.handlers import calendar as calendar_handlers
 from app.bot.handlers import donate as donate_handlers
 from app.bot.handlers import schedule as schedule_handlers
@@ -150,6 +151,10 @@ async def main() -> None:
     # должен превращаться в проигнорированное сообщение с паролем в чате.
     dispatcher = Dispatcher(storage=SQLAlchemyStorage(context.session_factory))
     dispatcher.update.middleware(DependenciesMiddleware(context))
+    # Рассылка — первой: ответ на неё ждёт текст в своём состоянии, и `/cancel`
+    # в этот момент должен отменять ответ, а не «вход в кабинет». Всё остальное
+    # в ней отфильтровано по владельцу или по кнопке и чужих апдейтов не берёт.
+    dispatcher.include_router(broadcast_handlers.router)
     # Порядок важен: диалог входа должен перехватывать текст раньше, чем
     # общие обработчики решат, что это неизвестная команда.
     dispatcher.include_router(account_handlers.router)
