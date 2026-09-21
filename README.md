@@ -63,36 +63,8 @@ HTTP-фид (FastAPI)  ─┘           │
 - **Хранится refresh-токен** — зашифрованным (Fernet/AES, ключ вне базы, в переменных окружения). Он открывает только твой личный кабинет и перестаёт действовать после `/logout`.
 - Шифрование защищает от утечки дампа базы. Оно **не** защищает от того, кто получил доступ к серверу целиком: ключ лежит на том же сервере.
 - Владелец инстанса технически может расшифровать токен и прочитать твоё расписание. Доверие к боту = доверие к тому, кто его хостит.
-- Не согласен — подними свою копию: `docker compose up -d`, и токен не покинет твой сервер.
 
 `/logout` удаляет токен и все производные данные без остатка.
-
-## Self-host
-
-```bash
-git clone https://github.com/Ekanam-Friends/Ikanam-schedule.git
-cd Ikanam-schedule
-cp .env.example .env      # BOT_TOKEN, CREDENTIALS_KEY, POSTGRES_PASSWORD, DOMAIN, PUBLIC_BASE_URL
-docker compose up -d --build
-```
-
-Поднимается четыре контейнера: PostgreSQL, бот, сервер подписки и Caddy, который
-сам получает сертификат Let's Encrypt для `DOMAIN`. Домен покупать не обязательно —
-подойдёт `51-250-1-2.sslip.io` (IP машины через дефисы). Миграции базы применяются
-при старте; обновление — `git pull && docker compose up -d --build`.
-
-Пошагово для Yandex Cloud, включая порты и резервные копии: [docs/deploy-yandex.md](docs/deploy-yandex.md).
-
-`CREDENTIALS_KEY` генерируется так:
-
-```bash
-python3 -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
-```
-
-Хостинг должен быть **в России**: при заходе с зарубежных IP личный кабинет требует капчу.
-При этом `api.telegram.org` из России доступен через прокси — укажи его в `TELEGRAM_PROXY`.
-Запросы к кабинету через прокси не идут: у двух адресатов противоположные требования,
-подробнее в [docs/api-notes.md](docs/api-notes.md).
 
 ## Лицензия
 
