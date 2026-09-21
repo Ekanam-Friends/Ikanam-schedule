@@ -46,6 +46,12 @@ BROWSER_HEADERS = {
 _LOGIN_TOKEN_RE = re.compile(r'name="logintoken"\s+value="([a-zA-Z0-9]+)"')
 _QR_HASH_RE = re.compile(r"qr=([a-f0-9]{16,})", re.IGNORECASE)
 
+# Ссылка подключения к живому вебинару MTS Link: `.../event/<event>/<access>`.
+# Отличается от записи прошедшего (`.../j/Ranepa/<event>/record-new/<rec>`) —
+# запись нам не нужна, ловим только живую. Снято с модуля `mtslinkrnhgs`
+# 2026-09-21.
+_MTS_LIVE_RE = re.compile(r"https://my\.mts-link\.ru/event/\d+/\d+")
+
 # Маркеры протухшего/недоступного QR на странице ответа. Текст снят вживую
 # 2026-09-21: открытие устаревшего хеша отдаёт именно «уже неактивен».
 _EXPIRED_MARKERS = ("неактив", "повторите сканирован")
@@ -196,6 +202,40 @@ class LmsClient:
             if marked is None:
                 raise LmsTemporaryError("СДО уводит на вход даже после перелогина")
         return marked
+
+    async def find_active_webinar(self, cmid: int) -> str | None:
+        """Ссылка на подключение к идущему сейчас вебинару MTS Link, или None.
+
+        `cmid` — id модуля `mtslinkrnhgs` в курсе (у макро — 1236024). На
+        странице модуля раздел «Текущие вебинары»: если вебинар идёт, там есть
+        ссылка `my.mts-link.ru/event/…`; если нет — «Нет активных вебинаров».
+        Записи прошедших (`…/record-new/…`) сюда не попадают — фильтр по шаблону.
+
+        Оговорка: если СДО начнёт подставлять ссылку скриптом уже в браузере, а
+        не в HTML, парсинг вернёт None и живую ссылку придётся брать из Playwright
+        или из AJAX модуля — проверим на первом живом вебинаре.
+        """
+        if not self._logged_in:
+            await self.login()
+        page = await self._fetch_module(cmid)
+        match = _MTS_LIVE_RE.search(page)
+        return match.group(0) if match else None
+
+    async def _fetch_module(self, cmid: int) -> str:
+        """GET страницы модуля с одним перелогином при истёкшей сессии."""
+        path = f"/mod/mtslinkrnhgs/view.php?id={cmid}"
+        try:
+            resp = await self._client.get(path)
+        except httpx.HTTPError as exc:
+            raise LmsTemporaryError(f"СДО не отдала модуль вебинаров: {exc}") from exc
+        if "/login/index.php" in str(resp.url):
+            self._logged_in = False
+            await self.login()
+            try:
+                resp = await self._client.get(path)
+            except httpx.HTTPError as exc:
+                raise LmsTemporaryError(f"СДО не отдала модуль вебинаров: {exc}") from exc
+        return resp.text
 
     async def _open_qr(self, qr_hash: str) -> Marked | None:
         """Открыть ссылку отметки. None — если СДО потребовала войти заново."""
