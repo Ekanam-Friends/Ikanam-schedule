@@ -13,7 +13,7 @@ import logging
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from app.core.config import Settings
 from app.db.activity import ActivityLog
@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 router = Router(name="stats")
 
 
-def is_owner(message: Message, settings: Settings) -> bool:
+def is_owner(message: Message | CallbackQuery, settings: Settings) -> bool:
     return (
         settings.owner_chat_id is not None
         and message.from_user is not None
