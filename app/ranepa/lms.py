@@ -46,11 +46,9 @@ BROWSER_HEADERS = {
 _LOGIN_TOKEN_RE = re.compile(r'name="logintoken"\s+value="([a-zA-Z0-9]+)"')
 _QR_HASH_RE = re.compile(r"qr=([a-f0-9]{16,})", re.IGNORECASE)
 
-# Ссылка подключения к живому вебинару MTS Link: `.../event/<event>/<access>`.
-# Отличается от записи прошедшего (`.../j/Ranepa/<event>/record-new/<rec>`) —
-# запись нам не нужна, ловим только живую. Снято с модуля `mtslinkrnhgs`
-# 2026-09-21.
-_MTS_LIVE_RE = re.compile(r"https://my\.mts-link\.ru/event/\d+/\d+")
+# Форма «Присоединиться» на странице модуля `mtslinkrnhgs`. Она в HTML всегда,
+# но пока вебинара нет, помечена `visually-hidden`. Снято вживую 2026-09-28.
+_JOIN_FORM_RE = re.compile(r"<form[^>]*moodle__join-webinar[^>]*>")
 
 # Маркеры протухшего/недоступного QR на странице ответа. Текст снят вживую
 # 2026-09-21: открытие устаревшего хеша отдаёт именно «уже неактивен».
@@ -204,22 +202,30 @@ class LmsClient:
         return marked
 
     async def find_active_webinar(self, cmid: int) -> str | None:
-        """Ссылка на подключение к идущему сейчас вебинару MTS Link, или None.
+        """Персональная ссылка на идущий сейчас вебинар MTS Link, или None.
 
-        `cmid` — id модуля `mtslinkrnhgs` в курсе (у макро — 1236024). На
-        странице модуля раздел «Текущие вебинары»: если вебинар идёт, там есть
-        ссылка `my.mts-link.ru/event/…`; если нет — «Нет активных вебинаров».
-        Записи прошедших (`…/record-new/…`) сюда не попадают — фильтр по шаблону.
-
-        Оговорка: если СДО начнёт подставлять ссылку скриптом уже в браузере, а
-        не в HTML, парсинг вернёт None и живую ссылку придётся брать из Playwright
-        или из AJAX модуля — проверим на первом живом вебинаре.
+        `cmid` — id модуля `mtslinkrnhgs` в курсе (у макро — 1236024). Прямой
+        ссылки в HTML нет (проверено вживую 2026-09-28): на странице есть форма
+        «Присоединиться», скрытая `visually-hidden`, пока вебинара нет. Если
+        форма видна, её POST (`join_webinar=Y`) отвечает 303 на персональную
+        ссылку `my.mts-link.ru/j/Ranepa/<event>/<token>`. Её и возвращаем.
         """
         if not self._logged_in:
             await self.login()
         page = await self._fetch_module(cmid)
-        match = _MTS_LIVE_RE.search(page)
-        return match.group(0) if match else None
+        form = _JOIN_FORM_RE.search(page)
+        if form is None or "visually-hidden" in form.group(0):
+            return None
+        try:
+            resp = await self._client.post(
+                f"/mod/mtslinkrnhgs/view.php?id={cmid}",
+                data={"join_webinar": "Y"},
+                follow_redirects=False,
+            )
+        except httpx.HTTPError as exc:
+            raise LmsTemporaryError(f"СДО не выдала ссылку на вебинар: {exc}") from exc
+        location = resp.headers.get("location", "")
+        return location if "mts-link.ru" in location else None
 
     async def _fetch_module(self, cmid: int) -> str:
         """GET страницы модуля с одним перелогином при истёкшей сессии."""
