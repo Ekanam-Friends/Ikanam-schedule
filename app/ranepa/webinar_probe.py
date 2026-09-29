@@ -93,9 +93,13 @@ _GRAB_JS = """
   try {
     w = demo.videoWidth || demo.width; h = demo.videoHeight || demo.height;
     if (w && h) {
-      const c = document.createElement('canvas'); c.width = w; c.height = h;
-      c.getContext('2d').drawImage(demo, 0, 0, w, h);
-      png = c.toDataURL('image/png').split(',')[1];
+      // Не больше 1280 по ширине и JPEG: PNG 1920×1200 раз в 4 с стоил
+      // заметную долю ядра, а QR на слайде крупный — читается и так.
+      const k = Math.min(1, 1280 / w);
+      const c = document.createElement('canvas');
+      c.width = Math.round(w * k); c.height = Math.round(h * k);
+      c.getContext('2d').drawImage(demo, 0, 0, c.width, c.height);
+      png = c.toDataURL('image/jpeg', 0.85).split(',')[1];
     }
   } catch (e) {}
   return {kind: demo.tagName.toLowerCase(), w, h, rect, png, muted};
@@ -216,12 +220,12 @@ async def grab_demo_frame(page) -> tuple[bytes | None, dict]:
         data = base64.b64decode(png)
         # Пустой кадр (WebGL-canvas без буфера) весит сотни байт — тогда снимаем
         # скриншот одной области демонстрации.
-        if len(data) > 5_000:
+        if len(data) > 3_000:
             return data, info
     rect = info.get("rect")
     if rect and rect["width"] > 0:
         info["kind"] += "+clip"
-        return await page.screenshot(clip=rect), info
+        return await page.screenshot(clip=rect, type="jpeg", quality=85), info
     return None, info
 
 
@@ -233,8 +237,15 @@ async def watch(
     interval: float = 10.0,
     keep_frame: str | None = "/tmp/webinar_qr.png",
     last_frame: str | None = None,
+    notes_dir: str | None = None,
+    on_qr=None,
 ) -> str | None:
     """Войти гостем и раз в `interval` с искать QR в кадре демонстрации.
+
+    `notes_dir` — собирать материал для конспекта: кадр при смене слайда и
+    текст панели «Расшифровка» МТС Линк. `on_qr(hash, png)` — если задан,
+    вызывается при поимке QR, а слежение продолжается до конца эфира (ради
+    конспекта); без него — возврат сразу при первом QR.
 
     Возвращает хеш при первой находке, иначе None по истечении `minutes` или
     если вебинар закончился. Отметку не делает — хеш отдаётся наверх
@@ -249,7 +260,13 @@ async def watch(
                 return None
             log.info("В эфире: %s", page.url)
             await _snapshot(page, "/tmp/webinar_inside.png")
+            notes = LectureNotes(notes_dir) if notes_dir else None
+            if notes:
+                await notes.open_transcript(page)
             frames = 0
+            qr_hash: str | None = None
+            changes = FrameChange()
+            next_forced = 0.0
             while time.monotonic() < deadline:
                 if "/stream" not in page.url:
                     # 2026-09-28 страница ушла с эфира за секунды до/после показа
@@ -259,7 +276,9 @@ async def watch(
                     await _snapshot(page, "/tmp/webinar_left.png")
                     if not await join_as_guest(page, url, name):
                         log.info("Обратно не пускает — вебинар закончился")
-                        return None
+                        return qr_hash
+                    if notes:
+                        await notes.open_transcript(page)
                     continue
                 # Подсказки МТС Линк («Поддерживайте ведущего… ПОНЯТНО») всплывают
                 # посреди эфира и закрывают низ слайда — там может быть QR.
@@ -273,34 +292,170 @@ async def watch(
                 frames += 1
                 if frames % 30 == 1:
                     log.info("кадр %d: %s", frames, info)
-                if data and last_frame:
-                    with open(last_frame, "wb") as fh:
-                        fh.write(data)
-                found = decode_qr(data) if data else None
-                if not found:
-                    # Слайды бывают не демонстрацией, а загруженной в МТС Линк
-                    # презентацией (картинка, не video) — 2026-09-28 на макро.
-                    # Поэтому ещё и снимок окна: 1280×720 декодируется быстро.
+                big_demo = (info.get("w") or 0) >= 960 and info.get("kind") == "video"
+                source = data
+                if not big_demo:
+                    # Слайды бывают загруженной в МТС Линк презентацией (картинка,
+                    # не video) — 2026-09-28 на макро. Тогда смотрим снимок окна.
                     try:
-                        shot = await page.screenshot()
+                        source = await page.screenshot(type="jpeg", quality=85)
                     except Exception:  # noqa: BLE001
-                        shot = None
-                    found = decode_qr(shot) if shot else None
-                    if shot and last_frame:
-                        with open(last_frame, "wb") as fh:
-                            fh.write(shot)
+                        source = None
+                if source and last_frame:
+                    with open(last_frame, "wb") as fh:
+                        fh.write(source)
+                if notes:
+                    await notes.collect(page, source)
+                if qr_hash:
+                    # QR уже отдан наверх — дальше только конспект.
+                    await asyncio.sleep(interval)
+                    continue
+                # Распознаём только изменившийся кадр: слайд висит минутами, а
+                # декодер — главный потребитель ядра (72% → 17% без него,
+                # замер 2026-09-29). Раз в 30 с — принудительно, на всякий случай.
+                found = None
+                if source and (changes.changed(source) or time.monotonic() >= next_forced):
+                    next_forced = time.monotonic() + 30
+                    found = decode_qr(source)
                     if found:
-                        data = shot
+                        data = source
                 if found:
                     log.info("QR пойман на кадре %d", frames)
                     if keep_frame:
                         with open(keep_frame, "wb") as fh:
                             fh.write(data)
-                    return found
+                    if on_qr is None:
+                        return found
+                    qr_hash = found
+                    try:
+                        await on_qr(found, data)
+                    except Exception:  # noqa: BLE001
+                        log.exception("on_qr упал — слежение продолжаю")
                 await asyncio.sleep(interval)
         finally:
+            if notes:
+                notes.flush()
             await browser.close()
-    return None
+    return qr_hash
+
+
+class FrameChange:
+    """Изменился ли кадр с прошлой проверки (по уменьшенной серой копии)."""
+
+    THRESHOLD = 3.0  # средняя разница яркости 0–255
+
+    def __init__(self) -> None:
+        self._last = None
+
+    def changed(self, img_bytes: bytes) -> bool:
+        try:
+            from PIL import Image, ImageChops, ImageOps, ImageStat
+
+            thumb = ImageOps.grayscale(Image.open(io.BytesIO(img_bytes))).resize((64, 36))
+        except Exception:  # noqa: BLE001
+            return True
+        if self._last is None:
+            self._last = thumb
+            return True
+        diff = ImageStat.Stat(ImageChops.difference(thumb, self._last)).mean[0]
+        self._last = thumb
+        return diff >= self.THRESHOLD
+
+
+class LectureNotes:
+    """Материал для конспекта: кадры слайдов при смене и текст расшифровки.
+
+    Кадр сохраняется JPEG-ом, только если заметно отличается от предыдущего
+    сохранённого (сравнение уменьшенных серых копий) — на лекцию выходит
+    десятки файлов, а не тысячи. Расшифровку МТС Линк («Расшифровка» в
+    правой панели) читаем раз в минуту и дописываем только новые строки.
+    """
+
+    SLIDE_DIFF = 12.0  # средняя разница яркости 0–255 на уменьшенной копии
+
+    def __init__(self, directory: str) -> None:
+        import os
+
+        os.makedirs(directory, exist_ok=True)
+        self.dir = directory
+        self._last_thumb = None
+        self._seen: set[str] = set()
+        self._lines: list[str] = []
+        self._next_text = 0.0
+        self.slides = 0
+
+    async def open_transcript(self, page) -> None:
+        try:
+            # Кнопка правой панели; не путать с индикатором «Ведется текстовая
+            # расшифровка» в шапке (снято 2026-09-29).
+            tab = page.locator("[data-testid='SidebarButtons.Transcription.iconButton']")
+            if await tab.count():
+                await tab.first.click(timeout=3_000)
+                await asyncio.sleep(2)
+                html = await page.evaluate(_PANEL_HTML_JS)
+                with open(f"{self.dir}/panel_debug.html", "w", encoding="utf-8") as fh:
+                    fh.write(html or "")
+                log.info("Панель расшифровки открыта")
+            else:
+                log.warning("Кнопки «Расшифровка» нет")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Расшифровка не открылась: %s", str(exc)[:120])
+
+    async def collect(self, page, png: bytes | None) -> None:
+        if png:
+            self._maybe_slide(png)
+        if time.monotonic() >= self._next_text:
+            self._next_text = time.monotonic() + 60
+            try:
+                text = await page.evaluate(_TRANSCRIPT_JS)
+            except Exception:  # noqa: BLE001
+                return
+            stamp = time.strftime("%H:%M")
+            for line in (text or "").splitlines():
+                line = line.strip()
+                if len(line) > 3 and line not in self._seen:
+                    self._seen.add(line)
+                    self._lines.append(f"[{stamp}] {line}")
+            self.flush()
+
+    def _maybe_slide(self, png: bytes) -> None:
+        try:
+            from PIL import Image, ImageChops, ImageOps, ImageStat
+        except ImportError:  # pragma: no cover
+            return
+        try:
+            img = Image.open(io.BytesIO(png)).convert("RGB")
+        except Exception:  # noqa: BLE001
+            return
+        thumb = ImageOps.grayscale(img).resize((64, 36))
+        if self._last_thumb is not None:
+            diff = ImageStat.Stat(ImageChops.difference(thumb, self._last_thumb)).mean[0]
+            if diff < self.SLIDE_DIFF:
+                return
+        self._last_thumb = thumb
+        self.slides += 1
+        img.save(f"{self.dir}/slide_{time.strftime('%H%M%S')}.jpg", quality=80)
+
+    def flush(self) -> None:
+        with open(f"{self.dir}/transcript.txt", "w", encoding="utf-8") as fh:
+            fh.write("\n".join(self._lines))
+
+
+# HTML правой панели для разбора, где живёт текст расшифровки.
+_PANEL_HTML_JS = """
+() => {
+  const el = document.querySelector('.stream-sidebar');
+  return el ? el.outerHTML.slice(0, 200000) : '';
+}
+"""
+
+# Текст расшифровки — содержимое правой панели (.stream-sidebar), открытой на ней.
+_TRANSCRIPT_JS = """
+() => {
+  const el = document.querySelector('.stream-sidebar');
+  return el ? el.innerText : '';
+}
+"""
 
 
 async def _dismiss_tips(page) -> None:
