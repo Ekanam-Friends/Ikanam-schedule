@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.db.models import User
 from app.db.repo import UserRepository
-from app.ranepa.client import AuthError, RanepaClient, RanepaError, Tokens
+from app.ranepa.client import AuthError, MaintenanceError, RanepaClient, RanepaError, Tokens
 from app.ranepa.models import Schedule
 from app.ranepa.parser import ScheduleParseError, parse_schedule
 from app.services.diff import Change, diff_schedules
@@ -43,6 +43,15 @@ class SyncError(Exception):
 
 class ReauthRequired(SyncError):
     """Кабинет не принял refresh-токен — нужен новый вход пользователя."""
+
+
+class CabinetClosed(SyncError):
+    """Кабинет на техработах: отдаёт заглушку вместо API.
+
+    Это не про пользователя и не про его токен — ломается у всех разом, и
+    планировщик по этому признаку решает, что пора не ждать следующей ночи,
+    а пробовать снова, пока кабинет не вернётся.
+    """
 
 
 class ScheduleSyncService:
@@ -85,6 +94,9 @@ class ScheduleSyncService:
             except AuthError as exc:
                 await self._repo.mark_failed(user, error=str(exc), deactivate=True)
                 raise ReauthRequired(str(exc)) from exc
+            except MaintenanceError as exc:
+                await self._repo.mark_failed(user, error=str(exc))
+                raise CabinetClosed(str(exc)) from exc
             except RanepaError as exc:
                 await self._repo.mark_failed(user, error=str(exc))
                 raise SyncError(str(exc)) from exc

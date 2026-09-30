@@ -97,6 +97,19 @@ class TemporaryError(RanepaError):
     """Кабинет недоступен или отвечает ошибкой — имеет смысл повторить позже."""
 
 
+class MaintenanceError(RanepaError):
+    """Кабинет закрыт: на адресах API отдаётся HTML-страница, а не JSON.
+
+    Так выглядят техработы (наблюдалось вживую 30.09.2026): nginx на любой путь
+    отвечает одной статической заглушкой «проводит работы по обновлению сайта».
+    GET получает её с кодом 200, POST — `405 Not Allowed`, потому что статику
+    нельзя «отправить». До приложения кабинета запрос не доходит, токены целы.
+
+    От `TemporaryError` не наследуется намеренно: повтор через секунды здесь
+    бесполезен, работы длятся часами. Повторять нужно следующей синхронизацией.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class Tokens:
     """Пара токенов доступа."""
@@ -214,6 +227,15 @@ class RanepaClient:
             await self.refresh()
 
     # --- Данные ---
+
+    async def ping(self) -> None:
+        """Убедиться, что API кабинета отвечает как API, а не заглушкой.
+
+        `version` — самый дешёвый эндпоинт: без авторизации и без нагрузки на
+        расписание. Ответ не нужен; важно только, что это JSON — иначе полетит
+        `MaintenanceError` (или `ChallengeError`, `TemporaryError`).
+        """
+        await self._request("GET", "version", attempts=1)
 
     async def get_student_groups(self) -> dict[str, Any]:
         """Учебные данные студента: организация, группа, список групп для расписания.
@@ -348,10 +370,18 @@ class RanepaClient:
         if response.status_code >= 500:
             raise TemporaryError(f"Кабинет ответил {response.status_code}")
 
+        path = response.request.url.path.rsplit("n-api/", 1)[-1]
+        if _looks_like_html(response):
+            # API кабинета HTML не отдаёт никогда. Если он пришёл и это не
+            # антибот-проверка — перед нами заглушка, а не ответ приложения.
+            raise MaintenanceError(
+                "Кабинет закрыт, похоже на техработы: вместо API отдаётся "
+                f"HTML-страница ({path}: {response.status_code})"
+            )
+
         if response.status_code >= 400:
             # Путь и причина из JSON — иначе в /status видно только «400», и
             # понять, какой из четырёх запросов не понравился кабинету, нельзя.
-            path = response.request.url.path.rsplit("n-api/", 1)[-1]
             reason = _cabinet_message(response) or "без объяснения"
             raise RanepaError(f"{path}: {response.status_code}, {reason}")
 
@@ -393,9 +423,12 @@ def _looks_like_waf(response: httpx.Response) -> bool:
 _CHALLENGE_MARKERS = ("get_jhash", "__js_p_")
 
 
+def _looks_like_html(response: httpx.Response) -> bool:
+    return "html" in response.headers.get("content-type", "").lower()
+
+
 def _looks_like_challenge(response: httpx.Response) -> bool:
-    content_type = response.headers.get("content-type", "").lower()
-    if "html" not in content_type:
+    if not _looks_like_html(response):
         return False
     body = response.text
     return any(marker in body for marker in _CHALLENGE_MARKERS)

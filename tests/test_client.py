@@ -17,6 +17,7 @@ from app.ranepa.client import (
     AuthError,
     BlockedError,
     ChallengeError,
+    MaintenanceError,
     RanepaClient,
     TemporaryError,
     Tokens,
@@ -157,6 +158,70 @@ async def test_js_challenge_is_not_mistaken_for_bad_credentials():
             await client.login("a", "b")
         # ChallengeError не наследуется от AuthError — повтор входа его не ловит.
         assert not issubclass(ChallengeError, AuthError)
+
+
+# --- Техработы: nginx отдаёт заглушку вместо API (снято вживую 30.09.2026) ---
+
+MAINTENANCE_PAGE = (
+    '<!DOCTYPE html><html lang="en"><head><title>РАНХиГС</title></head><body><main>'
+    "Президентская академия проводит работы по обновлению официального сайта."
+    "</main></body></html>"
+)
+
+NGINX_405 = (
+    "<html><head><title>405 Not Allowed</title></head><body>"
+    "<center><h1>405 Not Allowed</h1></center><hr><center>nginx</center></body></html>"
+)
+
+
+def cabinet_under_maintenance(calls: list[str] | None = None):
+    """Заглушка на любой путь: GET получает страницу, POST — 405 от nginx."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if calls is not None:
+            calls.append(request.method)
+        headers = {"content-type": "text/html; charset=utf-8"}
+        if request.method == "POST":
+            return httpx.Response(405, text=NGINX_405, headers=headers)
+        return httpx.Response(200, text=MAINTENANCE_PAGE, headers=headers)
+
+    return handler
+
+
+async def test_maintenance_405_on_refresh_is_named_and_not_retried():
+    """Ночь 30.09.2026: все 223 синхронизации упали с «auth/refresh: 405, без
+    объяснения». Причина должна читаться из ошибки, а повторять запрос через
+    секунды незачем — заглушка провисит часы."""
+    calls: list[str] = []
+    tokens = Tokens(access_token="", refresh_token="r", fszet="f")
+
+    async with client_with(cabinet_under_maintenance(calls), tokens=tokens) as client:
+        with pytest.raises(MaintenanceError, match=r"auth/refresh: 405"):
+            await client.refresh()
+
+    assert calls == ["POST"]
+    # Токен не трогаем: до приложения кабинета запрос не дошёл.
+    assert client.tokens == tokens
+
+
+async def test_maintenance_page_on_get_is_not_bad_json():
+    """Та же заглушка на GET приходит с кодом 200 — раньше это была невнятная
+    «Кабинет вернул не JSON» после четырёх повторов."""
+    calls: list[str] = []
+    tokens = Tokens(access_token="a", refresh_token="r")
+
+    async with client_with(cabinet_under_maintenance(calls), tokens=tokens) as client:
+        with pytest.raises(MaintenanceError, match=r"schedule: 200"):
+            await client.get_schedule([date(2026, 9, 30)], ["g"])
+
+    assert calls == ["GET"]
+
+
+def test_maintenance_never_asks_the_user_to_log_in_again():
+    """AuthError деактивирует пользователя и стирает его токен. Техработы
+    кабинета не должны стоить людям повторного входа."""
+    assert not issubclass(MaintenanceError, AuthError)
+    assert not issubclass(MaintenanceError, TemporaryError)
 
 
 # --- Решатель проверки: cookie из браузера подставляются в httpx ---

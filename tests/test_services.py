@@ -22,7 +22,7 @@ from app.db.repo import UserRepository
 from app.db.session import create_schema, make_engine, make_session_factory
 from app.ranepa.client import RanepaClient
 from app.services.account import AccountService, CabinetUnavailable, ConnectError, WrongCredentials
-from app.services.sync import ReauthRequired, ScheduleSyncService, SyncError
+from app.services.sync import CabinetClosed, ReauthRequired, ScheduleSyncService, SyncError
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SCHEDULE = json.loads((FIXTURES / "schedule_response.json").read_text(encoding="utf-8"))
@@ -214,6 +214,25 @@ async def test_sync_deactivates_user_when_refresh_is_rejected(services, cabinet,
     user = await repo.get(42)
     assert not user.is_active
     assert not user.is_connected
+
+
+async def test_sync_under_maintenance_keeps_token_and_names_the_cause(services, cabinet, repo):
+    """Техработы 30.09.2026: nginx отвечает 405 на POST auth/refresh. Это не
+    отказ в доступе — токен и активность остаются, а ошибка говорит, в чём дело."""
+    account, sync = services
+    await account.connect(42, "l", "p")
+    cabinet.refresh_response = httpx.Response(
+        405, text="<html>405 Not Allowed</html>", headers={"content-type": "text/html"}
+    )
+
+    with pytest.raises(CabinetClosed):
+        await sync.sync_user(await repo.get(42))
+
+    user = await repo.get(42)
+    assert user.is_active and user.is_connected
+    assert repo.refresh_token_of(user) == "ref-2"
+    assert "техработы" in user.last_sync_error
+    assert len((await repo.load_schedule(user)).lessons) == 3
 
 
 async def test_sync_keeps_old_snapshots_on_temporary_failure(services, cabinet, repo):

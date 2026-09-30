@@ -18,6 +18,8 @@ from app.bot.scheduler import (
     NightlyReport,
     SchedulerContext,
     digest_is_due,
+    night_was_lost,
+    recover_after_maintenance,
     report_to_owner,
     seconds_until,
     send_due_digests,
@@ -219,6 +221,179 @@ async def test_no_owner_configured_means_no_alert():
     await report_to_owner(context, NightlyReport(total=1, failed=1))
 
     assert bot.sent == []
+
+
+async def test_maintenance_alert_names_the_cause_and_the_retry():
+    bot = FakeBot()
+    context = SchedulerContext(
+        bot=bot, settings=settings(OWNER_CHAT_ID="42"), cipher=None, session_factory=None
+    )
+
+    await report_to_owner(context, NightlyReport(total=3, failed=3, closed=3))
+
+    assert "техработах" in bot.sent[0][1]
+    assert "каждые 30 мин" in bot.sent[0][1]
+
+
+async def test_report_is_sent_after_recovery_even_when_all_is_well():
+    bot = FakeBot()
+    context = SchedulerContext(
+        bot=bot, settings=settings(OWNER_CHAT_ID="42"), cipher=None, session_factory=None
+    )
+
+    await report_to_owner(
+        context, NightlyReport(total=3, synced=3), title="После техработ", always=True
+    )
+
+    assert "После техработ" in bot.sent[0][1]
+
+
+def test_cabinet_closed_means_nobody_synced_and_stub_was_seen():
+    assert NightlyReport(total=223, failed=223, closed=223).cabinet_was_closed
+    # Заглушка у части, но кто-то прошёл — кабинет открыт, просто не всем повезло.
+    assert not NightlyReport(total=3, synced=1, failed=2, closed=2).cabinet_was_closed
+    # Все упали, но не из-за заглушки — обычная ночь с 503, повторять по часам незачем.
+    assert not NightlyReport(total=3, failed=3).cabinet_was_closed
+    assert not NightlyReport().cabinet_was_closed
+
+
+# --- recover_after_maintenance: пробы раз в полчаса, пока кабинет не вернётся ---
+
+
+class RecoveryHarness:
+    """Кабинет, который открывается на N-й пробе, и подменённые сон и часы."""
+
+    def __init__(self, *, opens_on_probe: int, now: datetime) -> None:
+        self.opens_on_probe = opens_on_probe
+        self.probes = 0
+        self.slept: list[float] = []
+        self.synced = 0
+        self.now = now
+
+    async def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+
+    async def cabinet_is_open(self, ctx) -> bool:
+        self.probes += 1
+        return self.probes >= self.opens_on_probe
+
+    async def sync_everyone(self, ctx) -> NightlyReport:
+        self.synced += 1
+        return NightlyReport(total=5, synced=5)
+
+
+def recovery_context(bot: FakeBot) -> SchedulerContext:
+    return SchedulerContext(
+        bot=bot, settings=settings(OWNER_CHAT_ID="42"), cipher=None, session_factory=None
+    )
+
+
+async def test_recovery_probes_every_half_hour_then_syncs_everyone(monkeypatch):
+    """Ночь упала из-за заглушки. Две пробы впустую, третья видит JSON —
+    полный обход и отчёт владельцу, даже если всё прошло гладко."""
+    harness = RecoveryHarness(opens_on_probe=3, now=msk(3, 30))
+    monkeypatch.setattr("app.bot.scheduler.cabinet_is_open", harness.cabinet_is_open)
+    monkeypatch.setattr("app.bot.scheduler.sync_everyone", harness.sync_everyone)
+    bot = FakeBot()
+
+    report = await recover_after_maintenance(
+        recovery_context(bot), interval=1800, sleep=harness.sleep, now=lambda: harness.now
+    )
+
+    # Первая проба — сразу: заглушку могли снять, пока шёл обход.
+    assert harness.slept == [1800, 1800]
+    assert harness.probes == 3
+    assert harness.synced == 1
+    assert report is not None and report.synced == 5
+    assert len(bot.sent) == 1 and "после техработ" in bot.sent[0][1]
+
+
+async def test_recovery_gives_way_to_the_regular_night(monkeypatch):
+    """Кабинет не вернулся за сутки: за полчаса до штатной ночи пробы
+    прекращаются — иначе два обхода наложились бы друг на друга."""
+    harness = RecoveryHarness(opens_on_probe=10**9, now=msk(2, 45))
+    monkeypatch.setattr("app.bot.scheduler.cabinet_is_open", harness.cabinet_is_open)
+    monkeypatch.setattr("app.bot.scheduler.sync_everyone", harness.sync_everyone)
+    bot = FakeBot()
+
+    report = await recover_after_maintenance(
+        recovery_context(bot), interval=1800, sleep=harness.sleep, now=lambda: harness.now
+    )
+
+    assert report is None
+    assert harness.slept == []
+    assert harness.synced == 0
+    assert bot.sent == []
+
+
+async def test_recovery_does_not_sync_while_cabinet_is_closed(monkeypatch):
+    """Пока проба видит заглушку, две сотни пользователей по ней не гоняем."""
+    harness = RecoveryHarness(opens_on_probe=10**9, now=msk(3, 30))
+    ticks = {"n": 0}
+
+    async def sleep(seconds: float) -> None:
+        # После третьей пробы «наступает» время штатной ночи.
+        ticks["n"] += 1
+        if ticks["n"] == 3:
+            harness.now = msk(2, 45, day=8)
+        assert seconds == 1800
+
+    monkeypatch.setattr("app.bot.scheduler.cabinet_is_open", harness.cabinet_is_open)
+    monkeypatch.setattr("app.bot.scheduler.sync_everyone", harness.sync_everyone)
+
+    report = await recover_after_maintenance(
+        recovery_context(FakeBot()), interval=1800, sleep=sleep, now=lambda: harness.now
+    )
+
+    assert report is None
+    assert harness.probes == 3
+    assert harness.synced == 0
+
+
+# --- night_was_lost: старт бота после пропавшей ночи ---
+
+
+def synced_user(stamp: datetime | None) -> User:
+    return User(telegram_id=1, is_active=True, notify_on_change=True, last_sync_at=stamp)
+
+
+def test_night_is_lost_when_nobody_synced_after_it():
+    """30.09.2026: последние удачные — вчера утром, ночь в 03:00 упала у всех,
+    бот перезапущен в 05:10 МСК. Догонять надо сейчас, а не завтра."""
+    users = [synced_user(msk(3, 7, day=29)), synced_user(msk(12, 51, day=29))]
+    assert night_was_lost(users, now=msk(5, 10, day=30), sync_hour=3)
+
+
+def test_night_is_fine_while_anyone_synced_after_it():
+    users = [synced_user(msk(3, 7, day=29)), synced_user(msk(3, 9, day=30))]
+    assert not night_was_lost(users, now=msk(5, 10, day=30), sync_hour=3)
+
+
+def test_restart_before_the_night_is_not_a_lost_night():
+    """В 01:00 последняя штатная ночь — вчерашняя, и она прошла."""
+    users = [synced_user(msk(3, 9, day=29))]
+    assert not night_was_lost(users, now=msk(1, 0, day=30), sync_hour=3)
+
+
+def test_restart_during_the_sync_hour_counts_as_lost():
+    """Перезапуск в 03:02, до старта обхода со случайным сдвигом: штатная
+    петля уснёт до завтра, а люди останутся без обновления. Догоняем."""
+    users = [synced_user(msk(3, 9, day=29))]
+    assert night_was_lost(users, now=msk(3, 2, day=30), sync_hour=3)
+
+
+def test_nothing_to_recover_without_users():
+    assert not night_was_lost([], now=msk(12), sync_hour=3)
+
+
+def test_users_who_never_synced_count_as_lost():
+    """Подключились, а ночь упала до первого обхода — им тоже нужен догон."""
+    assert night_was_lost([synced_user(None)], now=msk(12), sync_hour=3)
+
+
+def test_naive_sync_timestamps_are_utc():
+    user = synced_user(datetime(2026, 9, 7, 8))  # 11:00 МСК, после ночи
+    assert not night_was_lost([user], now=msk(12), sync_hour=3)
 
 
 # --- token_is_stale: граница доверия к ключу доступа ---

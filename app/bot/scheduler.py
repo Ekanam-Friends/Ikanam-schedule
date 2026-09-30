@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -32,10 +32,10 @@ from app.db.activity import ActivityLog
 from app.db.models import User
 from app.db.repo import UserRepository
 from app.db.session import session_scope
-from app.ranepa.client import RanepaClient
+from app.ranepa.client import RanepaClient, RanepaError
 from app.services.notify import format_changes
 from app.services.stats import collect, format_summary, render_chart
-from app.services.sync import ReauthRequired, ScheduleSyncService, SyncError
+from app.services.sync import CabinetClosed, ReauthRequired, ScheduleSyncService, SyncError
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +45,14 @@ REAUTH_TEXT = (
     "Личный кабинет перестал принимать доступ бота — так бывает после смены "
     "пароля или по сроку. Подключите его заново: /login"
 )
+
+RECOVERY_INTERVAL = 30 * 60.0
+"""Как часто проверять, вернулся ли кабинет после техработ.
+
+Ночь 30.09.2026: кабинет закрыли заглушкой в 23:52, синхронизация в 03:00
+упала у всех, а следующая попытка была бы только через сутки — весь день
+люди ходили бы со вчерашним расписанием. Полчаса — это один запрос `version`
+за полчаса, кабинету незаметно, а людям расписание обновится в тот же день."""
 
 
 # --- Чистые правила времени: их удобно проверять без базы и без Telegram ---
@@ -78,6 +86,36 @@ def token_is_stale(user: User, *, now: datetime, max_age_days: int) -> bool:
     if anchor.tzinfo is None:
         anchor = anchor.replace(tzinfo=timezone.utc)
     return now - anchor > timedelta(days=max_age_days)
+
+
+def last_night_started(hour: int, *, now: datetime) -> datetime:
+    """Момент последнего штатного запуска ночной синхронизации (уже наступивший)."""
+    now_msk = now.astimezone(MOSCOW)
+    start = now_msk.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if start > now_msk:
+        start -= timedelta(days=1)
+    return start
+
+
+def night_was_lost(users: list[User], *, now: datetime, sync_hour: int) -> bool:
+    """После последнего штатного часа синхронизации не преуспел никто.
+
+    Проверяется на старте бота: перезапуск после ночи, которая упала целиком
+    (техработы кабинета, лежал сам сервер, бот перезапустили в самый час
+    обхода), не должен оставлять людей со вчерашним расписанием до следующей
+    ночи. Смотрим на самую свежую удачную синхронизацию среди всех: пока хоть
+    у кого-то она после ночи, кабинет работал — у остальных свои причины.
+    Без подключённых терять нечего.
+    """
+    if not users:
+        return False
+    stamps = [user.last_sync_at for user in users if user.last_sync_at is not None]
+    if not stamps:
+        return True
+    newest = max(stamps)
+    if newest.tzinfo is None:
+        newest = newest.replace(tzinfo=timezone.utc)
+    return newest < last_night_started(sync_hour, now=now)
 
 
 def seconds_until_local(clock: str, tz: str, *, now: datetime) -> float:
@@ -134,11 +172,27 @@ class NightlyReport:
     changed: int = 0
     reauth: int = 0
     failed: int = 0
+    closed: int = 0
+    """Сколько из `failed` — из-за заглушки кабинета (техработы)."""
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def cabinet_was_closed(self) -> bool:
+        """Не удалось никому, и хотя бы у одного — заглушка вместо API.
+
+        Признак «кабинет закрыт», а не «у кого-то не вышло»: единичные
+        ошибки бывают каждую ночь, а заглушка ломает всех разом."""
+        return self.total > 0 and self.synced == 0 and self.closed > 0
 
 
 async def run_nightly_loop(ctx: SchedulerContext) -> None:
     """Раз в сутки, в SYNC_HOUR_MSK, обойти всех подключённых."""
+    try:
+        if await nobody_synced_lately(ctx):
+            log.warning("После последней ночи не синхронизировался никто — догоняем сейчас")
+            await recover_after_maintenance(ctx)
+    except Exception:  # noqa: BLE001 — старт бота важнее догоняющего обхода
+        log.exception("Догоняющая синхронизация на старте упала")
     while True:
         delay = seconds_until(ctx.settings.sync_hour_msk, now=datetime.now(timezone.utc))
         log.info("Ночная синхронизация через %.0f мин", delay / 60)
@@ -146,8 +200,60 @@ async def run_nightly_loop(ctx: SchedulerContext) -> None:
         try:
             report = await sync_everyone(ctx)
             await report_to_owner(ctx, report)
+            if report.cabinet_was_closed:
+                await recover_after_maintenance(ctx)
         except Exception:  # noqa: BLE001 — петля не должна умереть из-за одной ночи
             log.exception("Ночная синхронизация упала целиком")
+
+
+async def nobody_synced_lately(ctx: SchedulerContext) -> bool:
+    async with session_scope(ctx.session_factory) as session:
+        users = await UserRepository(session, ctx.cipher).list_active()
+    return night_was_lost(
+        users, now=datetime.now(timezone.utc), sync_hour=ctx.settings.sync_hour_msk
+    )
+
+
+async def recover_after_maintenance(
+    ctx: SchedulerContext,
+    *,
+    interval: float = RECOVERY_INTERVAL,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> NightlyReport | None:
+    """Кабинет закрыт: каждые полчаса пробовать, не вернулся ли, и досинхронизировать.
+
+    Сначала одна дешёвая проба `version` — гонять по заглушке все две сотни
+    человек незачем. Ответил JSON — полный обход, как ночью, с отчётом
+    владельцу. Если до штатной ночи осталось меньше интервала, уступаем ей.
+
+    Returns:
+        Отчёт обхода, которым всё закончилось, или None, если кабинет так и
+        не вернулся до следующей ночи.
+    """
+    while True:
+        until_night = seconds_until(ctx.settings.sync_hour_msk, now=now(), jitter_minutes=0)
+        if until_night <= interval:
+            log.info("Кабинет так и не вернулся — ждём штатной ночной синхронизации")
+            return None
+        if await cabinet_is_open(ctx):
+            log.info("Кабинет отвечает — запускаем синхронизацию после техработ")
+            report = await sync_everyone(ctx)
+            await report_to_owner(ctx, report, title="Синхронизация после техработ", always=True)
+            if not report.cabinet_was_closed:
+                return report
+        await sleep(interval)
+
+
+async def cabinet_is_open(ctx: SchedulerContext) -> bool:
+    """Одна проба `version`: JSON — открыт, заглушка или любая ошибка — нет."""
+    try:
+        async with ctx.client_factory() as client:
+            await client.ping()
+    except RanepaError as exc:
+        log.info("Кабинет ещё закрыт: %s", exc)
+        return False
+    return True
 
 
 async def sync_everyone(ctx: SchedulerContext) -> NightlyReport:
@@ -207,6 +313,8 @@ async def sync_one(ctx: SchedulerContext, telegram_id: int, report: NightlyRepor
             return
         except SyncError as exc:
             report.failed += 1
+            if isinstance(exc, CabinetClosed):
+                report.closed += 1
             report.errors.append(f"{telegram_id}: {exc}"[:200])
             await activity.record("sync:error")
             return
@@ -295,23 +403,35 @@ async def send_owner_stats(ctx: SchedulerContext) -> bool:
     return True
 
 
-async def report_to_owner(ctx: SchedulerContext, report: NightlyReport) -> None:
+async def report_to_owner(
+    ctx: SchedulerContext,
+    report: NightlyReport,
+    *,
+    title: str = "Ночная синхронизация",
+    always: bool = False,
+) -> None:
     """Алерт владельцу: только когда есть о чём.
 
     Каждую ночь писать «всё хорошо» — способ приучить владельца не читать
     сообщения бота. Пишем, когда есть ошибки, или когда сломалось у всех.
+    `always` — для обхода после техработ: там и «всё хорошо» — новость.
     """
     owner = ctx.settings.owner_chat_id
     if owner is None:
         return
-    if report.failed == 0 and report.reauth == 0:
+    if report.failed == 0 and report.reauth == 0 and not always:
         return
     lines = [
-        "<b>Ночная синхронизация</b>",
+        f"<b>{title}</b>",
         f"Всего: {report.total}, успешно: {report.synced}, с изменениями: {report.changed}",
         f"Нужен повторный вход: {report.reauth}, ошибок: {report.failed}",
     ]
-    if report.total and report.failed == report.total:
+    if report.cabinet_was_closed:
+        lines.append(
+            "⚠️ Кабинет на техработах — отдаёт заглушку вместо API. "
+            f"Пробую снова каждые {RECOVERY_INTERVAL / 60:.0f} мин."
+        )
+    elif report.total and report.failed == report.total:
         lines.append("⚠️ Упали все — похоже, кабинет недоступен или сменил формат.")
     lines.extend(report.errors[:5])
     await _send(ctx.bot, owner, "\n".join(lines))
